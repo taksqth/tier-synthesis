@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "chara-rec-app"
+version = "0.1.0"
+description = "Character Recognition Application"
+authors = ["Taksqth <gabriel.takeshi.higa@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+keywords = ["character-recognition", "ocr"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+python-fasthtml = "^0.12.0"
+ipykernel = "^6.29.5"
+pillow = "^11.1.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.2"
+mypy = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,8 @@
+*.py[co]
+__pycache__/
+nbs/
+
+.sesskey
+*.db-*
+*.db
+requirements.txt
