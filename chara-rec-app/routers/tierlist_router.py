@@ -113,21 +113,6 @@ def create_group_selector(groups, selected_groups):
     )
 
 
-def create_tier_rows(tiers):
-    """Create the tier list rows"""
-    return [TierRow(tier) for tier in tiers]
-
-
-def create_images_container(images):
-    """Create the container for available images"""
-    return make_container(
-        Div(
-            *[get_image_element(image) for image in images],
-            cls="grid",
-        )
-    )
-
-
 # Routes
 @ar_tierlist.get("/edit", name="Tierlist Editor")
 def get_tierlist_editor(htmx, selected_groups: str = ""):
@@ -151,9 +136,14 @@ def get_tierlist_editor(htmx, selected_groups: str = ""):
             "Currently filtering: ",
             Em(", ".join(selected_groups) if selected_groups else "All groups"),
         ),
-        *create_tier_rows(tiers),
+        *[TierRow(tier) for tier in tiers],
         H3("Available Images"),
-        create_images_container(filtered_images),
+        make_container(
+            Div(
+                *[get_image_element(image) for image in filtered_images],
+                cls="grid",
+            )
+        ),
     )
 
     return get_full_layout(content) if htmx.request is None else content
