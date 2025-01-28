@@ -75,28 +75,88 @@ def TierRow(tier):
     )
 
 
-# Routes
-@ar_tierlist.get("/edit", name="Tierlist Editor")
-def get_tierlist_editor(htmx):
-    from .images_router import images
-
-    tiers = ["S", "A", "B", "C", "D"]
-
-    content = Container(
-        H1("Image Tier List"),
-        *[TierRow(tier) for tier in tiers],
-        H3("Available Images"),
-        make_container(
-            Div(
-                *[get_image_element(image) for image in images(order_by="-created_at")],
-                cls="grid",
-            )
+def create_group_selector(groups, selected_groups):
+    """Create the group selection dropdown with checkboxes"""
+    return Group(
+        Details(
+            Summary("Select Groups"),
+            Ul(
+                *[
+                    Li(
+                        Label(
+                            Input(
+                                type="checkbox",
+                                name="group",
+                                value=group,
+                                checked=(group in selected_groups),
+                            ),
+                            group,
+                        )
+                    )
+                    for group in groups
+                ]
+            ),
+            name="selected_groups",
+            cls="dropdown",
+        ),
+        Button(
+            "Apply",
+            hx_get="/tierlist/edit",
+            hx_vals="""js:{
+                selected_groups: Array.from(
+                    document.querySelector('details[name="selected_groups"]')
+                        .querySelectorAll('input[type="checkbox"]:checked')
+                ).map(cb => cb.value).join(',')
+            }""",
+            hx_target="#main",
         ),
     )
 
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+
+def create_tier_rows(tiers):
+    """Create the tier list rows"""
+    return [TierRow(tier) for tier in tiers]
+
+
+def create_images_container(images):
+    """Create the container for available images"""
+    return make_container(
+        Div(
+            *[get_image_element(image) for image in images],
+            cls="grid",
+        )
+    )
+
+
+# Routes
+@ar_tierlist.get("/edit", name="Tierlist Editor")
+def get_tierlist_editor(htmx, selected_groups: str = ""):
+    from .images_router import images
+
+    tiers = ["S", "A", "B", "C", "D"]
+    selected_groups = selected_groups.split(",") if selected_groups else []
+    images_query = images(order_by="-created_at")
+
+    groups = set(image.group for image in images_query)
+    filtered_images = [
+        image
+        for image in images_query
+        if (len(selected_groups) == 0 or image.group in selected_groups)
+    ]
+
+    content = Container(
+        H1("Image Tier List"),
+        create_group_selector(groups, selected_groups),
+        P(
+            "Currently filtering: ",
+            Em(", ".join(selected_groups) if selected_groups else "All groups"),
+        ),
+        *create_tier_rows(tiers),
+        H3("Available Images"),
+        create_images_container(filtered_images),
+    )
+
+    return get_full_layout(content) if htmx.request is None else content
 
 
 tierlist_router = ar_tierlist

@@ -18,8 +18,12 @@ class DBImage:
     created_at: str
 
 
-db = database("app/images.db")
-images = db.create(DBImage, pk="id", replace=True)
+db = database(os.environ.get("DB_PATH", "app/images.db"))
+images = db.create(
+    DBImage,
+    pk="id",
+    replace=True,
+)
 
 
 # Image processing utility
@@ -187,7 +191,7 @@ async def post_image_upload_form(uploaded_images: list[UploadFile]):
                     image_data=image_data,
                     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     content_type=image.content_type,
-                    group="",
+                    group="<no group>",
                 )
             )
 

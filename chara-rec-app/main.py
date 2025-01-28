@@ -24,7 +24,12 @@ def _not_found(req, exc):
     return Titled("Not Found", content)
 
 
-app, rt = fast_app(hdrs=(picolink,), before=bware, exception_handlers={404: _not_found})
+app, rt = fast_app(
+    hdrs=(picolink,),
+    before=bware,
+    exception_handlers={404: _not_found},
+    debug=os.environ.get("DEBUG", "false").lower() == "true",
+)
 for router in get_api_routers():
     router.to_app(app)
 
@@ -52,6 +57,11 @@ def get_home(htmx):
     if htmx.request is None:
         return get_full_layout(content)
     return content
+
+
+@app.get("/health")
+def health_check():
+    return "OK"
 
 
 if __name__ == "__main__":
