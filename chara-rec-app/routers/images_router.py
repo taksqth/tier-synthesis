@@ -18,15 +18,20 @@ class DBImage:
     created_at: str
 
 
-db = database(os.environ.get("DB_PATH", "app/images.db"))
+db = database(os.environ.get("DB_PATH", "app/database.db"))
 images = db.create(
     DBImage,
     pk="id",
-    replace=True,
+    transform=True,
 )
 
 
-# Image processing utility
+# Router setup
+ar_images = APIRouter(prefix="/images")
+ar_images.name = "Images"
+
+
+# Utility and component functions
 def process_image(img_data):
     img = Image.open(BytesIO(img_data))
     format = img.format
@@ -43,12 +48,6 @@ def process_image(img_data):
     return buffer.getvalue()
 
 
-# Router setup
-ar_images = APIRouter(prefix="/images")
-ar_images.name = "Images"
-
-
-# Image card and grid components
 def get_image_card(image):
     image_thumbnail = process_image(image.image_data)
     return Card(

@@ -2,6 +2,15 @@ import os
 from fasthtml.common import *
 from routers.base_layout import get_full_layout
 from routers import get_api_routers
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
+)
+
 
 api_routers = get_api_routers()
 
