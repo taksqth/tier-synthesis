@@ -60,8 +60,21 @@ def auth_handler(req, sess):
 @app.get("/")
 def get_home(htmx):
     content = Container(
-        H1("Welcome to Image Gallery"),
-        P("A simple image gallery application built with FastHTML"),
+        H1("Welcome to TierSynthesis"),
+        P(
+            "Create, share, and analyze character tier lists collaboratively. ",
+            "Discover patterns in character preferences and find like-minded fans.",
+        ),
+        Div(
+            A(
+                "Create New Tier List",
+                hx_get="/tierlist/edit",
+                hx_target="#main",
+                hx_push_url="true",
+                cls="button",
+            ),
+            style="text-align: center; margin-top: 2em;",
+        ),
     )
     if htmx.request is None:
         return get_full_layout(content)

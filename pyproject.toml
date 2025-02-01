@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "chara-rec-app"
+name = "tier-synthesis"
 version = "0.1.0"
-description = "Character Recognition Application"
+description = "A collaborative tier list platform for analyzing character preferences"
 authors = ["Taksqth <gabriel.takeshi.higa@gmail.com>"]
 readme = "README.md"
 license = "MIT"
-keywords = ["character-recognition", "ocr"]
+keywords = ["tier-list", "collaborative-filtering", "character-analysis"]
 
 [tool.poetry.dependencies]
 python = "^3.10"

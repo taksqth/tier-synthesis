@@ -34,7 +34,7 @@ def Navbar():
 
 def get_full_layout(content):
     return Titled(
-        "Image Gallery App",
+        "TierSynthesis",
         Navbar(),
         Main(content, cls="container", id="main"),
     )
