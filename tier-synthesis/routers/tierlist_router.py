@@ -211,6 +211,7 @@ tierlists = db.create(
 # Router setup
 ar_tierlist = APIRouter(prefix="/tierlist")
 ar_tierlist.name = "Tierlist"
+ar_tierlist.show = True
 
 
 # TODO: Move to a separate module later as more generic utility functions

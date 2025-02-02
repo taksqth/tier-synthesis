@@ -28,6 +28,7 @@ def get_header():
                         )
                     )
                     for api_router in get_api_routers()
+                    if api_router.show
                 ]
             ),
         ),
