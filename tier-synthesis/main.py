@@ -1,5 +1,6 @@
 import os
 from fasthtml.common import *
+from fasthtml.components import Zero_md
 from routers.base_layout import get_full_layout
 from routers import get_api_routers
 import logging
@@ -34,11 +35,15 @@ def _not_found(req, exc):
 
 
 app, rt = fast_app(
-    hdrs=(picolink,),
+    hdrs=(
+        picolink,
+        [Script(type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register")],
+    ),
     before=bware,
     exception_handlers={404: _not_found},
     debug=os.environ.get("DEBUG", "false").lower() == "true",
 )
+
 for router in get_api_routers():
     router.to_app(app)
 
@@ -59,8 +64,8 @@ def auth_handler(req, sess):
 
 @app.get("/")
 def get_home(htmx):
-    content = Container(
-        H1("Welcome to TierSynthesis"),
+    content = Titled(
+        "Welcome to TierSynthesis",
         P(
             "Create, share, and analyze character tier lists collaboratively. ",
             "Discover patterns in character preferences and find like-minded fans.",
@@ -75,6 +80,7 @@ def get_home(htmx):
             ),
             style="text-align: center; margin-top: 2em;",
         ),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
@@ -84,6 +90,34 @@ def get_home(htmx):
 @app.get("/health")
 def health_check():
     return "OK"
+
+
+@app.get("/privacy")
+def get_privacy(htmx):
+    with open("docs/privacy.md") as f:
+        md_content = f.read()
+    css_template = Template(Style(""), data_append=True)
+    content = Titled(
+        "Privacy Policy",
+        Zero_md(css_template, Script(md_content, type="text/markdown")),
+    )
+    if htmx.request is None:
+        return get_full_layout(content)
+    return content
+
+
+@app.get("/terms")
+def get_privacy(htmx):
+    with open("docs/terms.md") as f:
+        md_content = f.read()
+    css_template = Template(Style(""), data_append=True)
+    content = Titled(
+        "Terms of Service",
+        Zero_md(css_template, Script(md_content, type="text/markdown")),
+    )
+    if htmx.request is None:
+        return get_full_layout(content)
+    return content
 
 
 if __name__ == "__main__":
