@@ -87,8 +87,8 @@ class DBTierlist:
 
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
 
-        return Titled(
-            "Image Tier List",
+        return (
+            H1("Image Tier List"),
             self._create_group_selector(groups, selected_groups),
             P(
                 "Currently filtering: ",
@@ -132,7 +132,6 @@ class DBTierlist:
                     cls="grid",
                 )
             ),
-            id="main",
         )
 
     def _get_image_element(self, image):
@@ -245,13 +244,13 @@ def make_container(element, background_color="#f5f5f5"):
         ),
         style=(element.style if element.style else "")
         + f"""
-            grid-template-columns: repeat(auto-fill, 186px);
+            grid-template-columns: repeat(auto-fill, 130px);
             min-height: 120px;
             background-color: {background_color};
             border: 2px dashed #ccc;
             border-radius: 8px;
             padding: 1rem;
-            margin: 0.5rem 0;
+            margin: 0.1rem 0;
         """,
     )
 
@@ -279,7 +278,7 @@ def get_tierlist_editor(htmx, selected_groups: str = "", user_token: str = ""):
     content = tierlist.render_page(images_query)
     logger.info("Tierlist page rendered successfully")
 
-    return get_full_layout(content) if htmx.request is None else content
+    return get_full_layout(content, htmx)
 
 
 @ar_tierlist.post("/save")
