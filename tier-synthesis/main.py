@@ -1,9 +1,11 @@
 import os
 from fasthtml.common import *
+from fasthtml.oauth import DiscordAppClient, redir_url
 from fasthtml.components import Zero_md
 from routers.base_layout import get_full_layout
 from routers import get_api_routers
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -16,32 +18,55 @@ logging.basicConfig(
 api_routers = get_api_routers()
 
 
-def before(req, sess):
-    auth = req.scope["auth"] = sess.get("auth", None)
-    if not auth or auth != os.getenv("ACCESS_TOKEN"):
-        return RedirectResponse("/auth", status_code=303)
+class User:
+    id: str
+    authorized: bool
+    username: str
+    avatar: str
+
+
+db = database(os.environ.get("DB_PATH", "app/database.db"))
+users = db.create(
+    User,
+    pk="id",
+    transform=True,
+)
+
+
+def before(req, session):
+    auth = req.scope["auth"] = session.get("user_id", None)
+    if not auth:
+        return RedirectResponse("/login", status_code=303)
+    elif not users[auth].authorized and auth != os.environ.get("ADMIN_USER_ID"):
+        return RedirectResponse("/unauthorized", status_code=303)
 
 
 bware = Beforeware(
     before,
-    skip=[r"/favicon\.ico", r"/static/.*", r".*\.css", "/auth", "/terms", "/privacy"],
+    skip=[
+        r"/favicon\.ico",
+        r"/static/.*",
+        r".*\.css",
+        "/login",
+        "/terms",
+        "/privacy",
+        "/auth_redirect",
+        "/unauthorized",
+    ],
 )
 
 
 def _not_found(req, exc):
     logger.error(f"404 Not Found: {req.url.path}")
-    content = Container(
+    content = Titled(
         H1("404 - Page Not Found", align="center"),
         P("The page you're looking for doesn't exist.", align="center"),
         style="margin-top: 2em",
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
     return content
 
 
-def _server_error(htmx, req, exc):
+def _server_error(req, exc):
     logger.error(f"Internal Server Error: {str(exc)}")
     content = Titled(
         "500 - Internal Server Error",
@@ -50,10 +75,7 @@ def _server_error(htmx, req, exc):
             align="center",
         ),
         style="margin-top: 2em",
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
     return content
 
 
@@ -71,22 +93,70 @@ for router in get_api_routers():
     router.to_app(app)
 
 
+def get_discord_client():
+    client_id = os.environ.get("DISCORD_CLIENT_ID")
+    client_secret = os.environ.get("DISCORD_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        missing_vars = []
+        if not client_id:
+            missing_vars.append("DISCORD_CLIENT_ID")
+        if not client_secret:
+            missing_vars.append("DISCORD_CLIENT_SECRET")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing required environment variables: {', '.join(missing_vars)}",
+        )
+    return DiscordAppClient(
+        client_id=client_id, client_secret=client_secret, scope="identify"
+    )
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return FileResponse("favicon.ico")
 
 
-@app.get("/auth")
-def auth_handler(req, sess, htmx):
-    token = req.query_params.get("token")
-    print(f"token: {token}")
-    print(os.getenv("ACCESS_TOKEN", ""))
-    if token == os.getenv("ACCESS_TOKEN", ""):
-        sess["auth"] = token
-        return RedirectResponse("/", status_code=303)
-    content = (
-        H1("Forbidden"),
-        P("You are not authorized to access this page."),
+@app.get("/login")
+def login(htmx):
+    client = get_discord_client()
+    login_link = client.login_link()
+    logging.debug(f"Generated Discord login link: {login_link}")
+    content = P(A("Login with Discord", href=login_link), align="center")
+    return get_full_layout(content, htmx)
+
+
+@app.get("/logout")
+def logout(session):
+    session.pop("user_id", None)
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/auth_redirect")
+async def auth_redirect(code: str, session):
+    client = get_discord_client()
+    client.parse_response(code)
+    token = client.token["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    user_data = httpx.get(
+        "https://discord.com/api/v10/users/@me", headers=headers
+    ).json()
+    session["user_id"] = user_data["id"]
+    if user_data["id"] not in users:
+        users.insert(
+            User(
+                id=user_data["id"],
+                authorized=False,
+                username=user_data["username"],
+                avatar=user_data["avatar"],
+            )
+        )
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/unauthorized")
+def unauthorized(htmx):
+    content = P(
+        "You are not authorized to access this resource. Please contact an administrator."
     )
     return get_full_layout(content, htmx)
 

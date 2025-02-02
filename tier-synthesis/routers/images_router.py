@@ -29,6 +29,7 @@ images = db.create(
 # Router setup
 ar_images = APIRouter(prefix="/images")
 ar_images.name = "Images"
+ar_images.show = True
 
 
 # Utility and component functions
