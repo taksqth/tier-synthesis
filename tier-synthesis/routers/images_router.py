@@ -81,8 +81,8 @@ def get_image_grid(images):
 @ar_images.get("/id/{id}")
 def get_image_edit_form(id: int, htmx):
     image = images[id]
-    content = Card(
-        H1("Edit Image", align="center"),
+    content = Titled(
+        "Edit Image",
         Img(
             src=f"data:{image.content_type};base64,{base64.b64encode(image.image_data).decode()}",
             alt=image.name,
@@ -115,6 +115,7 @@ def get_image_edit_form(id: int, htmx):
                 ),
             ),
         ),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
@@ -151,11 +152,12 @@ def get_image_upload_form(htmx):
         hx_target="#image-list",
         hx_swap="afterbegin",
     )
-    content = Container(
-        H1("Upload Image"),
+    content = Titled(
+        "Upload Image",
         add,
-        H3("👇 Uploaded images 👇", align="center"),
+        H2("👇 Uploaded images 👇", align="center"),
         Div(id="image-list"),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
@@ -207,7 +209,7 @@ async def post_image_upload_form(uploaded_images: list[UploadFile]):
 @ar_images.get("/all", name="View Gallery")
 def get_image_gallery(htmx):
     grid = get_image_grid(images(order_by="-created_at"))
-    content = Container(H1("Image Gallery"), grid)
+    content = Titled("Image Gallery", grid, id="main")
 
     if htmx.request is None:
         return get_full_layout(content)

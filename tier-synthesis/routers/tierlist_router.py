@@ -87,8 +87,8 @@ class DBTierlist:
 
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
 
-        return Container(
-            H1("Image Tier List"),
+        return Titled(
+            "Image Tier List",
             self._create_group_selector(groups, selected_groups),
             P(
                 "Currently filtering: ",
@@ -98,7 +98,7 @@ class DBTierlist:
                 self._create_tier_row(tier, tierlist_data[tier])
                 for tier in tierlist_data.keys()
             ],
-            H3("Save or load tierlist"),
+            H2("Save or load tierlist"),
             Group(
                 Input(
                     name="user_token",
@@ -125,13 +125,14 @@ class DBTierlist:
                     cls="secondary",
                 ),
             ),
-            H3("Available Images"),
+            H2("Available Images"),
             make_container(
                 Div(
                     *leftover_images,
                     cls="grid",
                 )
             ),
+            id="main",
         )
 
     def _get_image_element(self, image):
