@@ -61,9 +61,12 @@ def get_footer():
     )
 
 
-def get_full_layout(content):
-    return Body(
-        Header(get_header()),
-        content,
-        Footer(get_footer()),
-    )
+def get_full_layout(content, htmx):
+    if htmx.request is None:
+        return (
+            Title("Tier Synthesis"),
+            Header(get_header()),
+            Container(content, id="main"),
+            Footer(get_footer()),
+        )
+    return content

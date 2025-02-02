@@ -81,8 +81,8 @@ def get_image_grid(images):
 @ar_images.get("/id/{id}")
 def get_image_edit_form(id: int, htmx):
     image = images[id]
-    content = Titled(
-        "Edit Image",
+    content = (
+        H1("Edit Image"),
         Img(
             src=f"data:{image.content_type};base64,{base64.b64encode(image.image_data).decode()}",
             alt=image.name,
@@ -115,11 +115,8 @@ def get_image_edit_form(id: int, htmx):
                 ),
             ),
         ),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 @ar_images.post("/id/{id}")
@@ -152,16 +149,13 @@ def get_image_upload_form(htmx):
         hx_target="#image-list",
         hx_swap="afterbegin",
     )
-    content = Titled(
-        "Upload Image",
+    content = (
+        H1("Upload Image"),
         add,
         H2("👇 Uploaded images 👇", align="center"),
         Div(id="image-list"),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 @ar_images.post("/add")
@@ -209,11 +203,9 @@ async def post_image_upload_form(uploaded_images: list[UploadFile]):
 @ar_images.get("/all", name="View Gallery")
 def get_image_gallery(htmx):
     grid = get_image_grid(images(order_by="-created_at"))
-    content = Titled("Image Gallery", grid, id="main")
+    content = (H1("Image Gallery"), grid)
 
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 images_router = ar_images

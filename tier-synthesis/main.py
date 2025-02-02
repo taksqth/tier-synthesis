@@ -29,12 +29,13 @@ bware = Beforeware(
 
 
 def _not_found(req, exc):
+    logger.error(f"404 Not Found: {req.url.path}")
     content = Container(
         H1("404 - Page Not Found", align="center"),
         P("The page you're looking for doesn't exist.", align="center"),
         style="margin-top: 2em",
     )
-    return Titled("Not Found", content)
+    return content
 
 
 app, rt = fast_app(
@@ -51,6 +52,11 @@ for router in get_api_routers():
     router.to_app(app)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse("favicon.ico")
+
+
 @app.get("/auth")
 def auth_handler(req, sess, htmx):
     token = req.query_params.get("token")
@@ -59,20 +65,17 @@ def auth_handler(req, sess, htmx):
     if token == os.getenv("ACCESS_TOKEN", ""):
         sess["auth"] = token
         return RedirectResponse("/", status_code=303)
-    content = Titled(
-        "Forbidden",
+    content = (
+        H1("Forbidden"),
         P("You are not authorized to access this page."),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 @app.get("/")
 def get_home(htmx):
-    content = Titled(
-        "Welcome to TierSynthesis",
+    content = (
+        H1("Welcome to TierSynthesis"),
         P(
             "Create, share, and analyze character tier lists collaboratively. ",
             "Discover patterns in character preferences and find like-minded fans.",
@@ -87,11 +90,8 @@ def get_home(htmx):
             ),
             style="text-align: center; margin-top: 2em;",
         ),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 @app.get("/health")
@@ -104,14 +104,11 @@ def get_privacy(htmx):
     with open("docs/privacy.md") as f:
         md_content = f.read()
     css_template = Template(Style(""), data_append=True)
-    content = Titled(
-        "Privacy Policy",
+    content = (
+        H1("Privacy Policy"),
         Zero_md(css_template, Script(md_content, type="text/markdown")),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 @app.get("/terms")
@@ -119,14 +116,11 @@ def get_privacy(htmx):
     with open("docs/terms.md") as f:
         md_content = f.read()
     css_template = Template(Style(""), data_append=True)
-    content = Titled(
-        "Terms of Service",
+    content = (
+        H1("Terms of Service"),
         Zero_md(css_template, Script(md_content, type="text/markdown")),
-        id="main",
     )
-    if htmx.request is None:
-        return get_full_layout(content)
-    return content
+    return get_full_layout(content, htmx)
 
 
 if __name__ == "__main__":
