@@ -1,11 +1,22 @@
-TODO List:
+# TierSynthesis
+
+A collaborative platform for creating and analyzing character tier lists. TierSynthesis helps users organize characters into tiers and discover patterns in character preferences across the community.
+
+## Features
+
+- Create and save character tier lists
+- Filter characters by groups/franchises
+- Share tier lists with others via unique tokens
+- Collaborative analysis of character preferences
+
+## TODO List
 
 - [ ] Integrate GitHub with Railway
-- [ ] Actually build .py files from notebooks
-- [ ] Find a way for people to save their tierlists in a secure way
-  - [x] Partially done, people can save their tierlist, but it's just a token reference
-- [x] Make it so people can filter groups of characters in the tierlist
-- [ ] Maybe create user groups?
-- [ ] Use tierlists to build a NMF or similar model to generate latents
-- [ ] Create a way for people to check which characters have high latent values
-- [ ] Create a way for people to check characters that are similar to their preferences vs other people (anonymous)
+- [ ] Build .py files from notebooks
+- [ ] Implement secure tierlist saving system
+  - [x] Basic token-based saving implemented
+- [x] Group-based character filtering
+- [ ] User groups implementation
+- [ ] Build NMF model for preference analysis
+- [ ] Character latent value analysis
+- [ ] Anonymous preference comparison system
