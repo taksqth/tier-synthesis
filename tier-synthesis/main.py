@@ -103,6 +103,7 @@ def get_privacy(htmx):
     content = Titled(
         "Privacy Policy",
         Zero_md(css_template, Script(md_content, type="text/markdown")),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
@@ -117,6 +118,7 @@ def get_privacy(htmx):
     content = Titled(
         "Terms of Service",
         Zero_md(css_template, Script(md_content, type="text/markdown")),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
