@@ -22,7 +22,10 @@ def before(req, sess):
         return RedirectResponse("/auth", status_code=303)
 
 
-bware = Beforeware(before, skip=[r"/favicon\.ico", r"/static/.*", r".*\.css", "/auth"])
+bware = Beforeware(
+    before,
+    skip=[r"/favicon\.ico", r"/static/.*", r".*\.css", "/auth", "/terms", "/privacy"],
+)
 
 
 def _not_found(req, exc):
@@ -100,6 +103,7 @@ def get_privacy(htmx):
     content = Titled(
         "Privacy Policy",
         Zero_md(css_template, Script(md_content, type="text/markdown")),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
@@ -114,6 +118,7 @@ def get_privacy(htmx):
     content = Titled(
         "Terms of Service",
         Zero_md(css_template, Script(md_content, type="text/markdown")),
+        id="main",
     )
     if htmx.request is None:
         return get_full_layout(content)
