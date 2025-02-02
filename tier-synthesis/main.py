@@ -22,7 +22,10 @@ def before(req, sess):
         return RedirectResponse("/auth", status_code=303)
 
 
-bware = Beforeware(before, skip=[r"/favicon\.ico", r"/static/.*", r".*\.css", "/auth"])
+bware = Beforeware(
+    before,
+    skip=[r"/favicon\.ico", r"/static/.*", r".*\.css", "/auth", "/terms", "/privacy"],
+)
 
 
 def _not_found(req, exc):
