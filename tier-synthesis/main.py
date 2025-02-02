@@ -28,22 +28,14 @@ bware = Beforeware(
 )
 
 
-<<<<<<< HEAD
-def _not_found(htmx, req, exc):
-    logger.error(f"Page Not Found: {str(exc)}")
-    content = Titled(
-        "404 - Page Not Found",
-=======
 def _not_found(req, exc):
     logger.error(f"404 Not Found: {req.url.path}")
     content = Container(
         H1("404 - Page Not Found", align="center"),
->>>>>>> main
         P("The page you're looking for doesn't exist.", align="center"),
         style="margin-top: 2em",
         id="main",
     )
-<<<<<<< HEAD
     if htmx.request is None:
         return get_full_layout(content)
     return content
@@ -62,8 +54,6 @@ def _server_error(htmx, req, exc):
     )
     if htmx.request is None:
         return get_full_layout(content)
-=======
->>>>>>> main
     return content
 
 
