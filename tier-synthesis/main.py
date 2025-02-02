@@ -28,13 +28,33 @@ bware = Beforeware(
 )
 
 
-def _not_found(req, exc):
-    content = Container(
-        H1("404 - Page Not Found", align="center"),
+def _not_found(htmx, req, exc):
+    logger.error(f"Page Not Found: {str(exc)}")
+    content = Titled(
+        "404 - Page Not Found",
         P("The page you're looking for doesn't exist.", align="center"),
         style="margin-top: 2em",
+        id="main",
     )
-    return Titled("Not Found", content)
+    if htmx.request is None:
+        return get_full_layout(content)
+    return content
+
+
+def _server_error(htmx, req, exc):
+    logger.error(f"Internal Server Error: {str(exc)}")
+    content = Titled(
+        "500 - Internal Server Error",
+        P(
+            "We're experiencing some technical difficulties. Please try again later or contact support if the problem persists.",
+            align="center",
+        ),
+        style="margin-top: 2em",
+        id="main",
+    )
+    if htmx.request is None:
+        return get_full_layout(content)
+    return content
 
 
 app, rt = fast_app(
@@ -43,7 +63,7 @@ app, rt = fast_app(
         [Script(type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register")],
     ),
     before=bware,
-    exception_handlers={404: _not_found},
+    exception_handlers={404: _not_found, 500: _server_error},
     debug=os.environ.get("DEBUG", "false").lower() == "true",
 )
 
