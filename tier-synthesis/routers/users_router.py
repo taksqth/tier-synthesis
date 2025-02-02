@@ -96,9 +96,9 @@ def toggle_user(user_id: str, session):
     """Toggle a user's authorized status"""
     logger.info(f"Toggling authorization for user {user_id}")
 
-    user_id = session.get("user_id")
-    if not user_id or user_id != ADMIN_ID:
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
+    caller_user_id = session.get("user_id")
+    if not caller_user_id or caller_user_id != ADMIN_ID:
+        logger.warning(f"Unauthorized access attempt by user {caller_user_id}")
         return RedirectResponse("/unauthorized", status_code=303)
 
     try:
