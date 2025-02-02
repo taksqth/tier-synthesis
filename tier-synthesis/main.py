@@ -52,17 +52,21 @@ for router in get_api_routers():
 
 
 @app.get("/auth")
-def auth_handler(req, sess):
+def auth_handler(req, sess, htmx):
     token = req.query_params.get("token")
     print(f"token: {token}")
     print(os.getenv("ACCESS_TOKEN", ""))
     if token == os.getenv("ACCESS_TOKEN", ""):
         sess["auth"] = token
         return RedirectResponse("/", status_code=303)
-    return Titled(
+    content = Titled(
         "Forbidden",
         P("You are not authorized to access this page."),
+        id="main",
     )
+    if htmx.request is None:
+        return get_full_layout(content)
+    return content
 
 
 @app.get("/")
