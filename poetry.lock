@@ -1029,13 +1029,13 @@ cli = ["click (>=5.0)"]
 
 [[package]]
 name = "python-fasthtml"
-version = "0.12.0"
+version = "0.12.3"
 description = "The fastest way to create an HTML app"
 optional = false
 python-versions = ">=3.10"
 files = [
-    {file = "python_fasthtml-0.12.0-py3-none-any.whl", hash = "sha256:0522e76c2f30b9da409c3bea69e753110e1255a9c45263e483175fd08b4a2aae"},
-    {file = "python_fasthtml-0.12.0.tar.gz", hash = "sha256:b3caa830dc91796c356fbe282eaca858adba67d63f08543ec1a03a3506bd3505"},
+    {file = "python_fasthtml-0.12.3-py3-none-any.whl", hash = "sha256:1f7c56907409bbe53b4b3e8789478a78a4b139cdbbb552397924cd0464290be8"},
+    {file = "python_fasthtml-0.12.3.tar.gz", hash = "sha256:96d85e2e5a1622680eba2677c8d3d1b850738644fd6558bde5ac54de71371c9e"},
 ]
 
 [package.dependencies]
@@ -1709,4 +1709,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "22cab042eef6b864f62291c95054a776ac87a9149d233b08842fe2df17ea5934"
+content-hash = "1712c95508a1f70abec2dac1fabc624d5c221863d0c340be908cf1323f3df783"
