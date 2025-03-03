@@ -1,0 +1,62 @@
+name: Version Bump and Sync
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  version-and-sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Poetry and plugins
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        poetry self add poetry-plugin-export
+    
+    - name: Configure Git
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub Actions"
+    
+    - name: Bump version based on commit message
+      run: |
+        LAST_COMMIT_MSG=${{ github.event.head_commit.message }}
+        echo "Last commit message: $LAST_COMMIT_MSG"
+        
+        # GitHub Actions will automatically skip if commit contains [skip ci]
+        # We don't need to check for it explicitly
+        
+        shopt -s nocasematch
+        if [[ $LAST_COMMIT_MSG =~ \[.*feat.*\] ]]; then
+          echo "Found [feat] - doing minor version bump"
+          poetry version minor
+        else
+          echo "No [feat] found - doing patch version bump"
+          poetry version patch
+        fi
+        
+        # Getting the new version for later use
+        NEW_VERSION=$(poetry version -s)
+        echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+    
+    - name: Sync requirements.txt with Poetry dependencies
+      run: |
+        # Export Poetry dependencies to requirements.txt
+        poetry export -f requirements.txt --output app/requirements.txt --without-hashes
+        
+        # Commit and push changes
+        git add pyproject.toml app/requirements.txt
+        git commit -m "chore: bump version to $NEW_VERSION and sync requirements [skip ci]"
+        git push
