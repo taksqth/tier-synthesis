@@ -2,7 +2,7 @@ name: Version Bump and Sync
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, chore/taksqth/version_bump_action ]
 
 jobs:
   version-and-sync:
@@ -32,7 +32,7 @@ jobs:
     
     - name: Bump version based on commit message
       run: |
-        LAST_COMMIT_MSG=${{ github.event.head_commit.message }}
+        LAST_COMMIT_MSG="${{ github.event.head_commit.message }}"
         echo "Last commit message: $LAST_COMMIT_MSG"
         
         # GitHub Actions will automatically skip if commit contains [skip ci]
