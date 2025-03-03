@@ -54,7 +54,7 @@ jobs:
     - name: Sync requirements.txt with Poetry dependencies
       run: |
         # Export Poetry dependencies to requirements.txt
-        poetry export -f requirements.txt --output app/requirements.txt --without-hashes
+        poetry export -f requirements.txt --output tier_synthesis/requirements.txt --without-hashes
         
         # Commit and push changes
         git add pyproject.toml app/requirements.txt
