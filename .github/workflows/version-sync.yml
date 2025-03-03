@@ -57,6 +57,6 @@ jobs:
         poetry export -f requirements.txt --output tier_synthesis/requirements.txt --without-hashes
         
         # Commit and push changes
-        git add pyproject.toml app/requirements.txt
+        git add pyproject.toml tier_synthesis/requirements.txt
         git commit -m "chore: bump version to $NEW_VERSION and sync requirements [skip ci]"
         git push
