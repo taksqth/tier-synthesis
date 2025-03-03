@@ -2,10 +2,7 @@ name: Version Bump and Sync
 
 on:
   push:
-    branches: [ main, chore/taksqth/version_bump_action ]
-
-permissions:
-  contents: write
+    branches: [ main ]
 
 jobs:
   version-and-sync:

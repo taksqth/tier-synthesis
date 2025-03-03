@@ -11,7 +11,7 @@ A collaborative platform for creating and analyzing character tier lists. TierSy
 
 ## TODO List
 
-- [ ] Integrate GitHub with Railway
+- [x] Integrate GitHub with Railway
 - [ ] Build .py files from notebooks
 - [ ] Implement secure tierlist saving system
   - [x] Basic token-based saving implemented
