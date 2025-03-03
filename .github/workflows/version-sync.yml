@@ -13,6 +13,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 1
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -32,7 +33,7 @@ jobs:
     
     - name: Bump version based on commit message
       run: |
-        LAST_COMMIT_MSG=${{ github.event.head_commit.message }}
+        LAST_COMMIT_MSG="${{ github.event.head_commit.message }}"
         echo "Last commit message: $LAST_COMMIT_MSG"
         
         # GitHub Actions will automatically skip if commit contains [skip ci]
@@ -54,9 +55,9 @@ jobs:
     - name: Sync requirements.txt with Poetry dependencies
       run: |
         # Export Poetry dependencies to requirements.txt
-        poetry export -f requirements.txt --output app/requirements.txt --without-hashes
+        poetry export -f requirements.txt --output tier_synthesis/requirements.txt --without-hashes
         
         # Commit and push changes
-        git add pyproject.toml app/requirements.txt
+        git add pyproject.toml tier_synthesis/requirements.txt
         git commit -m "chore: bump version to $NEW_VERSION and sync requirements [skip ci]"
         git push
