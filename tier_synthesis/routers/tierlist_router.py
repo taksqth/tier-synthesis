@@ -87,7 +87,7 @@ class DBTierlist:
 
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
 
-        return (
+        return Div(
             H1("Image Tier List"),
             self._create_group_selector(groups, selected_groups),
             P(
@@ -132,6 +132,9 @@ class DBTierlist:
                     cls="grid",
                 )
             ),
+            **{
+                "x-data": f"{{ dragging: null, selectedGroups: {json.dumps(selected_groups)} }}"
+            },
         )
 
     def _get_image_element(self, image):
@@ -166,7 +169,7 @@ class DBTierlist:
         )
 
     def _create_group_selector(self, groups, selected_groups):
-        """Create group selector"""
+        """Create group selector using Alpine.js for state management"""
         return Group(
             Details(
                 Summary("Select Groups"),
@@ -178,7 +181,7 @@ class DBTierlist:
                                     type="checkbox",
                                     name="group",
                                     value=group,
-                                    checked=(group in selected_groups),
+                                    **{"x-model": "selectedGroups"},
                                 ),
                                 group,
                             )
@@ -216,33 +219,31 @@ ar_tierlist.show = True
 
 # TODO: Move to a separate module later as more generic utility functions
 def make_draggable(element):
-    """Make an element draggable with drag and drop events"""
+    """Make an element draggable with drag and drop events using Alpine.js"""
     return element(
-        On("event.target.classList.add('dragging')", "dragstart"),
-        On("event.target.classList.remove('dragging')", "dragend"),
+        **{
+            "x-on:dragstart": "dragging = $el",
+            "x-on:dragend": "dragging = null",
+        },
         draggable="true",
     )
 
 
 def make_container(element, background_color="#f5f5f5"):
-    """Create a draggable container with drop zone functionality"""
+    """Create a draggable container with drop zone functionality using Alpine.js"""
     return element(
-        On("event.preventDefault()", "dragover"),
-        On(
-            """
-            event.preventDefault();
-            
-            const source = document.querySelector('.dragging');
-            const target = event.target.closest('article');
-            
-            if (source && target) {
-                target.parentNode.insertBefore(source, target);
-            } else if (source) {
-                event.currentTarget.insertBefore(source, event.currentTarget.firstChild);
-            }
-        """,
-            "drop",
-        ),
+        **{
+            "x-on:dragover": "$event.preventDefault()",
+            "x-on:drop": """
+                $event.preventDefault();
+                const target = $event.target.closest('article');
+                if (dragging && target) {
+                    target.parentNode.insertBefore(dragging, target);
+                } else if (dragging) {
+                    $event.currentTarget.insertBefore(dragging, $event.currentTarget.firstChild);
+                }
+            """,
+        },
         style=(element.style if element.style else "")
         + f"""
             grid-template-columns: repeat(auto-fill, 130px);
@@ -306,7 +307,7 @@ def save_tierlist(htmx, tierlist: str, selected_groups: str):
         logger.error(f"Failed to save tierlist: {e}")
         raise
 
-    return get_tierlist_editor(htmx, user_token=user_token)
+    return get_tierlist_editor(htmx, user_token=user_token, selected_groups=selected_groups)
 
 
 tierlist_router = ar_tierlist

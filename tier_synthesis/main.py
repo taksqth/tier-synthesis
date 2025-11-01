@@ -91,7 +91,10 @@ def _server_error(req, exc):
 app, rt = fast_app(
     hdrs=(
         picolink,
-        [Script(type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register")],
+        [
+            Script(type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register"),
+            Script(defer=True, src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"),
+        ],
     ),
     before=bware,
     exception_handlers={404: _not_found, 500: _server_error},
