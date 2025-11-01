@@ -4,8 +4,10 @@ from fasthtml.oauth import DiscordAppClient
 from fasthtml.components import Zero_md
 from routers.base_layout import get_full_layout
 from routers import get_api_routers
+from dataclasses import dataclass
 import logging
 import httpx
+import hashlib
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -18,6 +20,11 @@ logging.basicConfig(
 api_routers = get_api_routers()
 
 
+def is_local_dev():
+    return os.environ.get("LOCAL_DEV", "false").lower() == "true"
+
+
+@dataclass
 class User:
     id: str
     authorized: bool
@@ -37,6 +44,8 @@ def before(req, session):
     auth = req.scope["auth"] = session.get("user_id", None)
     if not auth:
         return RedirectResponse("/login", status_code=303)
+    elif is_local_dev():
+        return None
     elif not users[auth].authorized and auth != os.environ.get("ADMIN_USER_ID"):
         return RedirectResponse("/unauthorized", status_code=303)
 
@@ -118,6 +127,34 @@ async def favicon():
 
 @app.get("/login")
 def login(htmx):
+    if is_local_dev():
+        content = Div(
+            H1("Mock Login", align="center"),
+            P("Create a mock user to login:", align="center"),
+            Form(
+                Input(
+                    type="text",
+                    name="username",
+                    placeholder="Username",
+                    required=True,
+                ),
+                Label(
+                    Input(
+                        type="checkbox",
+                        name="authorized",
+                        value="true",
+                        checked=True,
+                    ),
+                    "Authorized",
+                ),
+                Button("Login", type="submit"),
+                action="/auth_redirect",
+                method="get",
+                style="max-width: 400px; margin: 0 auto;",
+            ),
+        )
+        return get_full_layout(content, htmx)
+
     client = get_discord_client()
     login_link = client.login_link(redirect_uri=os.environ.get("DISCORD_REDIRECT_URI"))
     logging.debug(f"Generated Discord login link: {login_link}")
@@ -132,24 +169,41 @@ def logout(session):
 
 
 @app.get("/auth_redirect")
-async def auth_redirect(code: str, session):
-    client = get_discord_client()
-    client.parse_response(code)
-    token = client.token["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-    user_data = httpx.get(
-        "https://discord.com/api/v10/users/@me", headers=headers
-    ).json()
-    session["user_id"] = user_data["id"]
-    if user_data["id"] not in users:
-        users.insert(
-            User(
-                id=user_data["id"],
-                authorized=False,
-                username=user_data["username"],
-                avatar=user_data["avatar"],
+async def auth_redirect(
+    code: str = "", username: str = "", authorized: str = "", session=None
+):
+    if is_local_dev() and username:
+        user_id = f"mock_{hashlib.md5(username.encode()).hexdigest()[:8]}"
+        is_authorized = authorized == "true"
+
+        if user_id not in users:
+            users.insert(
+                User(
+                    id=user_id,
+                    username=username,
+                    authorized=is_authorized,
+                    avatar="",
+                )
             )
-        )
+        session["user_id"] = user_id
+    else:
+        client = get_discord_client()
+        client.parse_response(code, redirect_uri=os.environ.get("DISCORD_REDIRECT_URI"))
+        token = client.token["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        user_data = httpx.get(
+            "https://discord.com/api/v10/users/@me", headers=headers
+        ).json()
+        session["user_id"] = user_data["id"]
+        if user_data["id"] not in users:
+            users.insert(
+                User(
+                    id=user_data["id"],
+                    authorized=False,
+                    username=user_data["username"],
+                    avatar=user_data["avatar"],
+                )
+            )
     return RedirectResponse("/", status_code=303)
 
 
@@ -201,7 +255,7 @@ def get_privacy(htmx):
 
 
 @app.get("/terms")
-def get_privacy(htmx):
+def get_terms(htmx):
     with open("docs/terms.md") as f:
         md_content = f.read()
     css_template = Template(Style(""), data_append=True)
