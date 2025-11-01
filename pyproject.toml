@@ -1,6 +1,6 @@
 [project]
 name = "tier-synthesis"
-version = "0.1.2"
+version = "0.1.3"
 description = "A collaborative tier list platform for analyzing character preferences"
 authors = [{name = "Taksqth", email = "gabriel.takeshi.higa@gmail.com"}]
 readme = "README.md"
