@@ -1175,7 +1175,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pillow", specifier = ">=11.1.0" },
-    { name = "python-fasthtml", specifier = ">=0.12.3" },
+    { name = "python-fasthtml", specifier = "==0.12.33" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2" },
 ]
 provides-extras = ["dev"]

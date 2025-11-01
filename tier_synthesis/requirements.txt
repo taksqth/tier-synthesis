@@ -17,7 +17,7 @@ certifi==2024.12.14
     #   httpx
 click==8.1.8
     # via uvicorn
-fastcore==1.7.28
+fastcore==1.8.14
     # via
     #   apswutils
     #   fastlite
@@ -50,7 +50,7 @@ python-dateutil==2.9.0.post0
     # via python-fasthtml
 python-dotenv==1.0.1
     # via uvicorn
-python-fasthtml==0.12.3
+python-fasthtml==0.12.33
     # via tier-synthesis (pyproject.toml)
 python-multipart==0.0.20
     # via python-fasthtml
