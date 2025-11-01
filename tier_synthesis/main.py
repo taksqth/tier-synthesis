@@ -1,6 +1,6 @@
 import os
 from fasthtml.common import *
-from fasthtml.oauth import DiscordAppClient, redir_url
+from fasthtml.oauth import DiscordAppClient
 from fasthtml.components import Zero_md
 from routers.base_layout import get_full_layout
 from routers import get_api_routers
@@ -119,7 +119,7 @@ async def favicon():
 @app.get("/login")
 def login(htmx):
     client = get_discord_client()
-    login_link = client.login_link()
+    login_link = client.login_link(redirect_uri=os.environ.get("DISCORD_REDIRECT_URI"))
     logging.debug(f"Generated Discord login link: {login_link}")
     content = P(A("Login with Discord", href=login_link), align="center")
     return get_full_layout(content, htmx)

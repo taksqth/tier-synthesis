@@ -22,12 +22,11 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-    
-    - name: Install Poetry and plugins
+
+    - name: Install uv
       run: |
-        curl -sSL https://install.python-poetry.org | python3 -
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-        poetry self add poetry-plugin-export
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
     
     - name: Configure Git
       run: |
@@ -38,28 +37,40 @@ jobs:
       run: |
         LAST_COMMIT_MSG="${{ github.event.head_commit.message }}"
         echo "Last commit message: $LAST_COMMIT_MSG"
-        
+
         # GitHub Actions will automatically skip if commit contains [skip ci]
         # We don't need to check for it explicitly
-        
+
+        # Get current version from pyproject.toml
+        CURRENT_VERSION=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)
+        echo "Current version: $CURRENT_VERSION"
+
+        # Parse version components
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
         shopt -s nocasematch
         if [[ $LAST_COMMIT_MSG =~ \[.*feat.*\] ]]; then
           echo "Found [feat] - doing minor version bump"
-          poetry version minor
+          MINOR=$((MINOR + 1))
+          PATCH=0
         else
           echo "No [feat] found - doing patch version bump"
-          poetry version patch
+          PATCH=$((PATCH + 1))
         fi
-        
-        # Getting the new version for later use
-        NEW_VERSION=$(poetry version -s)
+
+        NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+        echo "New version: $NEW_VERSION"
+
+        # Update version in pyproject.toml
+        sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
+
         echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
     
-    - name: Sync requirements.txt with Poetry dependencies
+    - name: Sync requirements.txt with uv dependencies
       run: |
-        # Export Poetry dependencies to requirements.txt
-        poetry export -f requirements.txt --output tier_synthesis/requirements.txt --without-hashes
-        
+        # Export uv dependencies to requirements.txt
+        uv pip compile pyproject.toml -o tier_synthesis/requirements.txt
+
         # Commit and push changes
         git add pyproject.toml tier_synthesis/requirements.txt
         git commit -m "chore: bump version to $NEW_VERSION and sync requirements [skip ci]"
