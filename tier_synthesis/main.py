@@ -30,6 +30,7 @@ class User:
     authorized: bool
     username: str
     avatar: str
+    is_admin: bool
 
 
 db = database(os.environ.get("DB_PATH", "app/database.db"))
@@ -42,11 +43,20 @@ users = db.create(
 
 def before(req, session):
     auth = req.scope["auth"] = session.get("user_id", None)
-    if not auth:
+    if not auth or auth not in users:
+        if auth:
+            session.clear()
         return RedirectResponse("/login", status_code=303)
-    elif is_local_dev():
-        return None
-    elif not users[auth].authorized and auth != os.environ.get("ADMIN_USER_ID"):
+
+    user = users[auth]
+    admin_user_id = os.environ.get("ADMIN_USER_ID", "")
+    is_admin = user.is_admin or (auth == admin_user_id)
+    req.scope["is_admin"] = is_admin
+
+    if req.url.path.startswith("/admin/") and not is_admin:
+        return RedirectResponse("/unauthorized", status_code=303)
+
+    if not is_local_dev() and not user.authorized:
         return RedirectResponse("/unauthorized", status_code=303)
 
 
@@ -92,8 +102,14 @@ app, rt = fast_app(
     hdrs=(
         picolink,
         [
-            Script(type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register"),
-            Script(defer=True, src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"),
+            Link(rel="stylesheet", href="/static/styles.css"),
+            Script(
+                type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register"
+            ),
+            Script(
+                defer=True,
+                src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js",
+            ),
         ],
     ),
     before=bware,
@@ -175,6 +191,8 @@ def logout(session):
 async def auth_redirect(
     code: str = "", username: str = "", authorized: str = "", session=None
 ):
+    admin_user_id = os.environ.get("ADMIN_USER_ID")
+
     if is_local_dev() and username:
         user_id = f"mock_{hashlib.md5(username.encode()).hexdigest()[:8]}"
         is_authorized = authorized == "true"
@@ -186,6 +204,7 @@ async def auth_redirect(
                     username=username,
                     authorized=is_authorized,
                     avatar="",
+                    is_admin=(user_id == admin_user_id),
                 )
             )
         session["user_id"] = user_id
@@ -205,21 +224,22 @@ async def auth_redirect(
                     authorized=False,
                     username=user_data["username"],
                     avatar=user_data["avatar"],
+                    is_admin=(user_data["id"] == admin_user_id),
                 )
             )
     return RedirectResponse("/", status_code=303)
 
 
 @app.get("/unauthorized")
-def unauthorized(htmx):
+def unauthorized(htmx, request):
     content = P(
         "You are not authorized to access this resource. Please contact an administrator."
     )
-    return get_full_layout(content, htmx)
+    return get_full_layout(content, htmx, request.scope.get("is_admin", False))
 
 
 @app.get("/")
-def get_home(htmx):
+def get_home(htmx, request):
     content = (
         H1("Welcome to TierSynthesis"),
         P(
@@ -237,7 +257,7 @@ def get_home(htmx):
             style="text-align: center; margin-top: 2em;",
         ),
     )
-    return get_full_layout(content, htmx)
+    return get_full_layout(content, htmx, request.scope.get("is_admin", False))
 
 
 @app.get("/health")

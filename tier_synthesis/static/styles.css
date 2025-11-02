@@ -1,0 +1,33 @@
+/* Generic flex row - first child left-aligned, rest right-aligned */
+.flex-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.flex-row > *:first-child {
+    flex-grow: 1;
+}
+
+/* Clickable list item styles */
+.clickable-list-item {
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--muted-border-color);
+    border-radius: var(--border-radius);
+    transition: background-color 0.2s ease;
+}
+
+.clickable-list-item:hover {
+    background-color: var(--secondary-hover);
+    cursor: pointer;
+}
+
+.clickable-list-item a {
+    text-decoration: none;
+    color: var(--primary);
+}
+
+.clickable-list-item a:hover {
+    text-decoration: underline;
+}

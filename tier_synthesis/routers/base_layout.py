@@ -1,16 +1,24 @@
 from fasthtml.common import *
 from . import get_api_routers
+import os
 
 
 def get_named_routes(api_router):
     return [(route[3], route[1]) for route in api_router.routes if route[3] is not None]
 
 
-def get_header():
+def get_header(is_admin=False):
+
     def create_nav_link(title, page_path):
         return A(title, hx_get=page_path, hx_target="#main", hx_push_url="true")
 
-    return Div(
+    def should_show_router(api_router):
+        is_admin_router = api_router.prefix.startswith("/admin/")
+        if is_admin_router:
+            return is_admin
+        return api_router.show
+
+    return Container(
         Nav(
             Ul(Li(Strong(A("Home", href="/")))),
             Ul(
@@ -28,11 +36,10 @@ def get_header():
                         )
                     )
                     for api_router in get_api_routers()
-                    if api_router.show
+                    if should_show_router(api_router)
                 ]
             ),
         ),
-        cls="container",
     )
 
 
@@ -62,11 +69,11 @@ def get_footer():
     )
 
 
-def get_full_layout(content, htmx):
+def get_full_layout(content, htmx, is_admin=False):
     if htmx.request is None:
         return (
             Title("Tier Synthesis"),
-            Header(get_header()),
+            Header(get_header(is_admin)),
             Container(content, id="main"),
             Footer(get_footer()),
         )
