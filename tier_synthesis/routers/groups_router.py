@@ -1,5 +1,5 @@
 from fasthtml.common import *
-from .base_layout import get_full_layout
+from .base_layout import get_full_layout, list_item
 from dataclasses import dataclass
 import os
 import logging
@@ -32,7 +32,6 @@ class UserGroup:
                     **{"@click": "$refs.createGroupModal.showModal()"},
                 ),
                 cls="flex-row",
-                style="margin-bottom: 2rem;",
             ),
             Dialog(
                 Article(
@@ -66,29 +65,25 @@ class UserGroup:
                 ),
                 **{"x-ref": "createGroupModal"},
             ),
-            Ul(
-                *[
-                    Li(
-                        A(
-                            group.groupname,
-                            href=f"{ar_groups.prefix}/id/{group.id}",
-                            hx_get=f"{ar_groups.prefix}/id/{group.id}",
-                            hx_target="#main",
-                            hx_push_url="true",
-                        ),
-                        Button(
-                            "Delete",
-                            hx_delete=f"{ar_groups.prefix}/id/{group.id}",
-                            hx_confirm=f"Delete group {group.groupname}?",
-                            hx_target="#main",
-                            cls="secondary outline",
-                        ),
-                        cls="flex-row clickable-list-item",
-                    )
-                    for group in group_list
-                ],
-                style="list-style: none; padding: 0;",
-            ),
+            *[
+                list_item(
+                    A(
+                        group.groupname,
+                        href=f"{ar_groups.prefix}/id/{group.id}",
+                        hx_get=f"{ar_groups.prefix}/id/{group.id}",
+                        hx_target="#main",
+                        hx_push_url="true",
+                    ),
+                    Button(
+                        "Delete",
+                        hx_delete=f"{ar_groups.prefix}/id/{group.id}",
+                        hx_confirm=f"Delete group {group.groupname}?",
+                        hx_target="#main",
+                        cls="secondary outline",
+                    ),
+                )
+                for group in group_list
+            ],
             **{"x-data": "{}"},
         )
 
@@ -166,17 +161,17 @@ def view_group(group_id: str, htmx, request):
 
 
 @ar_groups.post("/create")
-def create_group(groupname: str, htmx):
+def create_group(groupname: str, htmx, request):
     user_groups.insert(UserGroup(groupname=groupname))
     logger.info(f"Create group {groupname}")
-    return list_groups(htmx)
+    return list_groups(htmx, request)
 
 
 @ar_groups.delete("/id/{group_id}")
-def delete_group(group_id: str, htmx):
+def delete_group(group_id: str, htmx, request):
     logger.info(f"Deleting group {group_id}")
     user_groups.delete(group_id)
-    return list_groups(htmx)
+    return list_groups(htmx, request)
 
 
 @dataclass
@@ -202,23 +197,19 @@ class UserGroupMembership:
 
         return (
             H2("Members"),
-            Ul(
-                *[
-                    Li(
-                        Span(user["username"]),
-                        Button(
-                            "Remove",
-                            hx_delete=f"{ar_groups.prefix}/membership/{user['membership_id']}",
-                            hx_confirm=f"Remove {user['username']} from this group?",
-                            hx_target="#main",
-                            cls="secondary outline",
-                        ),
-                        cls="flex-row clickable-list-item",
-                    )
-                    for user in users
-                ],
-                style="list-style: none; padding: 0;",
-            ),
+            *[
+                list_item(
+                    Span(user["username"]),
+                    Button(
+                        "Remove",
+                        hx_delete=f"{ar_groups.prefix}/membership/{user['membership_id']}",
+                        hx_confirm=f"Remove {user['username']} from this group?",
+                        hx_target="#main",
+                        cls="secondary outline",
+                    ),
+                )
+                for user in users
+            ],
         )
 
 
@@ -253,18 +244,18 @@ def get_member_options(group_id: str):
 
 
 @ar_groups.post("/id/{group_id}/add-member")
-def add_member(group_id: str, member_user_id: str, htmx):
+def add_member(group_id: str, member_user_id: str, htmx, request):
     user_group_membership.insert({"user_id": member_user_id, "group_id": group_id})
     logger.info(f"Added user {member_user_id} to group {group_id}")
-    return view_group(group_id, htmx)
+    return view_group(group_id, htmx, request)
 
 
 @ar_groups.delete("/membership/{membership_id}")
-def remove_user_from_group(membership_id: str, htmx):
+def remove_user_from_group(membership_id: str, htmx, request):
     group_id = user_group_membership[membership_id].group_id
     logger.info(f"Removing membership {membership_id}")
     user_group_membership.delete(membership_id)
-    return view_group(group_id, htmx)
+    return view_group(group_id, htmx, request)
 
 
 groups_router = ar_groups

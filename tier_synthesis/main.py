@@ -10,18 +10,20 @@ import httpx
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+
+def is_local_dev():
+    return os.environ.get("LOCAL_DEV", "false").lower() == "true"
+
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.DEBUG if is_local_dev() else logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
 
 
 api_routers = get_api_routers()
-
-
-def is_local_dev():
-    return os.environ.get("LOCAL_DEV", "false").lower() == "true"
 
 
 @dataclass

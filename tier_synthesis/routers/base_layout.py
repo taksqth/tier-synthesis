@@ -3,6 +3,16 @@ from . import get_api_routers
 import os
 
 
+def list_item(content, action_button):
+    """Create a list item article with content and action button"""
+    return Article(content, action_button, cls="flex-row")
+
+
+def tag(text):
+    """Create a small tag badge"""
+    return Small(text, cls="tag")
+
+
 def get_named_routes(api_router):
     return [(route[3], route[1]) for route in api_router.routes if route[3] is not None]
 
@@ -76,5 +86,12 @@ def get_full_layout(content, htmx, is_admin=False):
             Header(get_header(is_admin)),
             Container(content, id="main"),
             Footer(get_footer()),
+            Script("""
+                document.body.addEventListener('htmx:beforeSwap', function() {
+                    document.querySelectorAll('details[open]').forEach(details => {
+                        details.removeAttribute('open');
+                    });
+                });
+            """),
         )
     return content
