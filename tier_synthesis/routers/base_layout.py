@@ -85,13 +85,19 @@ def get_full_layout(content, htmx, is_admin=False):
             Title("Tier Synthesis"),
             Header(get_header(is_admin)),
             Container(content, id="main"),
+            Div(id="toast"),
             Footer(get_footer()),
             Script("""
-                document.body.addEventListener('htmx:beforeSwap', function() {
-                    document.querySelectorAll('details[open]').forEach(details => {
-                        details.removeAttribute('open');
+                (function() {
+                    if (window._globalHandlersRegistered) return;
+                    window._globalHandlersRegistered = true;
+
+                    document.body.addEventListener('htmx:beforeSwap', function() {
+                        document.querySelectorAll('details[open]').forEach(details => {
+                            details.removeAttribute('open');
+                        });
                     });
-                });
+                })();
             """),
         )
     return content

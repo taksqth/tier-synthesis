@@ -15,6 +15,7 @@ class DBImage:
     name: str
     category: str
     image_data: bytes
+    thumbnail_data: bytes
     content_type: str
     created_at: str
 
@@ -85,14 +86,26 @@ def process_image(img_data):
     return buffer.getvalue()
 
 
+def get_image_thumbnail(image):
+    """Get thumbnail for an image, generating and caching if needed"""
+    if image.thumbnail_data:
+        return image.thumbnail_data
+
+    thumbnail = process_image(image.image_data)
+    image.thumbnail_data = thumbnail
+    images.update(image)
+    return thumbnail
+
+
 def get_image_card(image, user_id: str):
     from .base_layout import tag
 
-    image_thumbnail = process_image(image.image_data)
+    thumbnail = get_image_thumbnail(image)
+
     is_owner = image.owner_id == user_id
     return Card(
         Img(
-            src=f"data:{image.content_type};base64,{base64.b64encode(image_thumbnail).decode()}",
+            src=f"data:{image.content_type};base64,{base64.b64encode(thumbnail).decode()}",
             alt=image.name,
         ),
         P(image.name),
@@ -100,21 +113,22 @@ def get_image_card(image, user_id: str):
     )
 
 
-def get_image_grid(images, user_id: str):
-    def create_link(content, page_path):
-        return A(content, hx_get=page_path, hx_target="#main", hx_push_url="true")
+def create_link(content, page_path):
+    return A(content, hx_get=page_path, hx_target="#main", hx_push_url="true")
 
-    return (
-        Div(
-            *[
-                create_link(get_image_card(image, user_id), f"/images/id/{image.id}")
-                for image in images
-            ],
-            cls="grid",
-            style="""
-                grid-template-columns: repeat(auto-fill, 150px);
-            """,
-        ),
+
+def get_image_cards(images, user_id: str):
+    return [
+        create_link(get_image_card(image, user_id), f"/images/id/{image.id}")
+        for image in images
+    ]
+
+
+def get_image_grid(images, user_id: str):
+    return Div(
+        *get_image_cards(images, user_id),
+        cls="grid",
+        style="grid-template-columns: repeat(auto-fill, 150px);",
     )
 
 
@@ -148,11 +162,23 @@ def get_image_edit_form(id: int, htmx, request, session):
 
     shared_group_ids = [
         row["user_group_id"]
-        for row in db.q("SELECT user_group_id FROM image_share WHERE image_id = ?", [id])
+        for row in db.q(
+            "SELECT user_group_id FROM image_share WHERE image_id = ?", [id]
+        )
     ]
 
     content = (
-        H1("Edit Image"),
+        Header(
+            H1("Edit image"),
+            Button(
+                "Delete",
+                hx_delete=f"{ar_images.prefix}/id/{id}",
+                hx_confirm="Delete this image?",
+                hx_target="#main",
+                cls="secondary outline",
+            ),
+            cls="flex-row",
+        ),
         Img(
             src=f"data:{image.content_type};base64,{base64.b64encode(image.image_data).decode()}",
             alt=image.name,
@@ -202,10 +228,12 @@ def get_image_edit_form(id: int, htmx, request, session):
                 Input(
                     type="submit",
                     value="Submit",
-                    hx_post=f"/images/id/{id}",
+                    hx_post=f"{ar_images.prefix}/id/{id}",
                     hx_target="#main",
                     disabled=not can_edit,
-                ) if can_edit else None,
+                )
+                if can_edit
+                else None,
             ),
         ),
     )
@@ -214,7 +242,13 @@ def get_image_edit_form(id: int, htmx, request, session):
 
 @ar_images.post("/id/{id}")
 def post_image_edit_form(
-    id: int, name: str, category: str, shared_groups: list[str] = None, htmx=None, request=None, session=None
+    id: int,
+    name: str,
+    category: str,
+    htmx,
+    request,
+    session,
+    shared_groups: list[str] = None,
 ):
     image = images[id]
     user_id = session.get("user_id")
@@ -240,10 +274,25 @@ def post_image_edit_form(
     return get_image_gallery(htmx, request, session)
 
 
+@ar_images.delete("/id/{id}")
+def delete_image(id: int, htmx, request, session):
+    owner_id = session.get("user_id")
+    image = images[id]
+
+    if image.owner_id != owner_id:
+        logger.warning(
+            f"User {owner_id} attempted to delete image {id} owned by {image.owner_id}"
+        )
+        return RedirectResponse("/unauthorized", status_code=303)
+
+    images.delete(id)
+    return get_image_gallery(htmx, request, session)
+
+
 @ar_images.get("/add", name="Upload Images")
 def get_image_upload_form(htmx):
     inp = Card(
-        H3("Drag and drop images here"),
+        P(Strong("Drag and drop images here")),
         Input(
             type="file",
             name="uploaded_images",
@@ -257,15 +306,20 @@ def get_image_upload_form(htmx):
     add = Form(
         inp,
         enctype="multipart/form-data",
-        hx_post="/images/add",
+        hx_post=f"{ar_images.prefix}/add",
         hx_target="#image-list",
         hx_swap="afterbegin",
+        hx_on__after_request="this.reset()",
     )
     content = (
         H1("Upload Image"),
         add,
         H2("👇 Uploaded images 👇", align="center"),
-        Div(id="image-list"),
+        Div(
+            id="image-list",
+            cls="grid",
+            style="grid-template-columns: repeat(auto-fill, 150px);",
+        ),
     )
     return get_full_layout(content, htmx)
 
@@ -293,11 +347,14 @@ async def post_image_upload_form(uploaded_images: list[UploadFile], session):
             img = Image.open(BytesIO(image_data))
             img.load()
 
+            thumbnail_data = process_image(image_data)
+
             valid_images.append(
                 DBImage(
                     owner_id=owner_id,
                     name=f"Image_{uuid.uuid4().hex[:8]}",
                     image_data=image_data,
+                    thumbnail_data=thumbnail_data,
                     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     content_type=image.content_type,
                     category="<no category>",
@@ -305,7 +362,7 @@ async def post_image_upload_form(uploaded_images: list[UploadFile], session):
             )
 
         images_to_insert = [images.insert(image) for image in valid_images]
-        return get_image_grid(images_to_insert, owner_id)
+        return get_image_cards(images_to_insert, owner_id)
 
     except Exception as e:
         return Div(

@@ -104,6 +104,7 @@ app, rt = fast_app(
     hdrs=(
         picolink,
         [
+            Meta(name="description", content="Create, share, and analyze character tier lists collaboratively. Discover patterns in character preferences and find like-minded fans."),
             Link(rel="stylesheet", href="/static/styles.css"),
             Script(
                 type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register"
@@ -114,6 +115,7 @@ app, rt = fast_app(
             ),
         ],
     ),
+    htmlkw={"lang": "en"},
     before=bware,
     exception_handlers={404: _not_found, 500: _server_error},
     debug=os.environ.get("DEBUG", "false").lower() == "true",
