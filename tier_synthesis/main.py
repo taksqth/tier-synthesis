@@ -58,7 +58,7 @@ def before(req, session):
     if req.url.path.startswith("/admin/") and not is_admin:
         return RedirectResponse("/unauthorized", status_code=303)
 
-    if not is_local_dev() and not user.authorized:
+    if not is_local_dev() and not user.authorized and not is_admin:
         return RedirectResponse("/unauthorized", status_code=303)
 
 
