@@ -1,5 +1,5 @@
 from fasthtml.common import *
-from .base_layout import get_full_layout
+from .base_layout import get_full_layout, list_item, tag
 from dataclasses import dataclass
 from collections import defaultdict
 from datetime import datetime
@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 class DBTierlist:
     TIERS = ["S", "A", "B", "C", "D"]
 
-    user_token: str
+    id: int
+    owner_id: str
     selected_groups: str
     name: str
     data: str
@@ -28,7 +29,8 @@ class DBTierlist:
             f"Creating new empty tierlist with selected_groups: {selected_groups}"
         )
         tierlist = cls(
-            user_token="",
+            id=0,
+            owner_id="",
             selected_groups=selected_groups,
             name="New Tierlist",
             data=json.dumps({tier: [] for tier in cls.TIERS}),
@@ -76,55 +78,39 @@ class DBTierlist:
 
     def render_page(self, images: list) -> Container:
         """Render the full tierlist editor page"""
-        groups = set(image.group for image in images)
+        categories = set(image.category for image in images)
         selected_groups = self.get_selected_groups()
 
         filtered_images = [
             image
             for image in images
-            if not selected_groups or image.group in selected_groups
+            if not selected_groups or image.category in selected_groups
         ]
 
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
 
         return Div(
-            H1("Image Tier List"),
-            self._create_group_selector(groups, selected_groups),
+            Header(
+                H1("Image Tier List"),
+                Button(
+                    "Back to tierlists",
+                    hx_get="/tierlist/list",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="secondary",
+                ),
+                cls="flex-row",
+            ),
+            self._create_save_form(),
+            self._create_group_selector(categories, selected_groups),
             P(
                 "Currently filtering: ",
-                Em(", ".join(selected_groups) if selected_groups else "All groups"),
+                Em(", ".join(selected_groups) if selected_groups else "All categories"),
             ),
             *[
                 self._create_tier_row(tier, tierlist_data[tier])
                 for tier in tierlist_data.keys()
             ],
-            H2("Save or load tierlist"),
-            Group(
-                Input(
-                    name="user_token",
-                    value=self.user_token if self.user_token else "",
-                    id="token_holder",
-                ),
-                Button(
-                    "Save",
-                    hx_post="/tierlist/save",
-                    hx_vals=f"""js:{{
-                        tierlist: {self._get_tierlist_data_js()},
-                        selected_groups: {self._get_selected_groups_js()}
-                    }}""",
-                    hx_target="#main",
-                ),
-                Button(
-                    "Load",
-                    hx_get="/tierlist/edit",
-                    hx_vals=f"""js:{{
-                        user_token: document.querySelector('#token_holder').value,
-                        selected_groups: {self._get_selected_groups_js()}
-                    }}""",
-                    hx_target="#main",
-                    cls="secondary",
-                ),
-            ),
             H2("Available Images"),
             make_container(
                 Div(
@@ -132,8 +118,33 @@ class DBTierlist:
                     cls="grid",
                 )
             ),
+            Script("""
+                let confirmShown = false;
+
+                document.body.addEventListener('htmx:beforeRequest', function(e) {
+                    if (confirmShown) return;
+                    if (e.target.textContent.includes('Save')) return;
+
+                    const data = Alpine.$data(document.querySelector('[x-data]'));
+                    if (data && data.hasUnsavedChanges) {
+                        confirmShown = true;
+                        if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
+                            e.preventDefault();
+                        }
+                        setTimeout(() => confirmShown = false, 100);
+                    }
+                });
+
+                window.addEventListener('beforeunload', function(e) {
+                    const data = Alpine.$data(document.querySelector('[x-data]'));
+                    if (data && data.hasUnsavedChanges) {
+                        e.preventDefault();
+                        e.returnValue = '';
+                    }
+                });
+            """),
             **{
-                "x-data": f"{{ dragging: null, selectedGroups: {json.dumps(selected_groups)} }}"
+                "x-data": f"{{ dragging: null, selectedGroups: {json.dumps(selected_groups)}, saving: false, hasUnsavedChanges: false }}"
             },
         )
 
@@ -168,25 +179,59 @@ class DBTierlist:
             ),
         )
 
-    def _create_group_selector(self, groups, selected_groups):
-        """Create group selector using Alpine.js for state management"""
+    def _create_save_form(self):
+        return (
+            Label(
+                "Name",
+                Group(
+                    Input(
+                        name="tierlist_name",
+                        value=self.name,
+                        placeholder="My Tierlist",
+                        id="tierlist-name-input",
+                        **{"@input": "hasUnsavedChanges = true"},
+                    ),
+                    Button(
+                        "Save",
+                        hx_post="/tierlist/save",
+                        hx_vals=f"""js:{{
+                            tierlist: {self._get_tierlist_data_js()},
+                            selected_groups: {self._get_selected_groups_js()},
+                            tierlist_id: {self.id if self.id else 0},
+                            name: document.getElementById('tierlist-name-input').value,
+                        }}""",
+                        hx_target="#main",
+                        cls="primary",
+                        **{
+                            "x-bind:aria-busy": "saving",
+                            "@htmx:before-request": "saving = true; hasUnsavedChanges = false",
+                            "@htmx:after-request": "saving = false",
+                        },
+                    ),
+                    cls="flex-row",
+                ),
+            ),
+        )
+
+    def _create_group_selector(self, categories, selected_groups):
+        """Create category selector using Alpine.js for state management"""
         return Group(
             Details(
-                Summary("Select Groups"),
+                Summary("Select Categories"),
                 Ul(
                     *[
                         Li(
                             Label(
                                 Input(
                                     type="checkbox",
-                                    name="group",
-                                    value=group,
+                                    name="category",
+                                    value=category,
                                     **{"x-model": "selectedGroups"},
                                 ),
-                                group,
+                                category,
                             )
                         )
-                        for group in groups
+                        for category in categories
                     ]
                 ),
                 name="selected_groups",
@@ -202,11 +247,54 @@ class DBTierlist:
             ),
         )
 
+    @staticmethod
+    def render_list(tierlist_list: list["DBTierlist"]):
+        """Render list of tierlists for the current user"""
+        return Div(
+            Header(
+                H1("My Tierlists"),
+                A(
+                    "Create New",
+                    hx_get="/tierlist/edit",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="primary",
+                    role="button",
+                ),
+                cls="flex-row",
+            ),
+            *[
+                list_item(
+                    A(
+                        Strong(tierlist.name),
+                        f" - {tierlist.created_at[:10]}",
+                        Br() if tierlist.get_selected_groups() else None,
+                        *[tag(group) for group in tierlist.get_selected_groups()],
+                        href=f"/tierlist/edit?tierlist_id={tierlist.id}",
+                        hx_get=f"/tierlist/edit?tierlist_id={tierlist.id}",
+                        hx_target="#main",
+                        hx_push_url="true",
+                    ),
+                    Button(
+                        "Delete",
+                        hx_delete=f"/tierlist/id/{tierlist.id}",
+                        hx_confirm="Delete this tierlist?",
+                        hx_target="#main",
+                        cls="secondary outline",
+                    ),
+                )
+                for tierlist in tierlist_list
+            ]
+            if tierlist_list
+            else P("No tierlists yet. Create one to get started!"),
+        )
+
 
 db = database(os.environ.get("DB_PATH", "app/database.db"))
 tierlists = db.create(
     DBTierlist,
-    pk="user_token",
+    pk="id",
+    foreign_keys=[("owner_id", "user")],
     transform=True,
 )
 
@@ -239,8 +327,10 @@ def make_container(element, background_color="#f5f5f5"):
                 const target = $event.target.closest('article');
                 if (dragging && target) {
                     target.parentNode.insertBefore(dragging, target);
+                    hasUnsavedChanges = true;
                 } else if (dragging) {
                     $event.currentTarget.insertBefore(dragging, $event.currentTarget.firstChild);
+                    hasUnsavedChanges = true;
                 }
             """,
         },
@@ -259,55 +349,102 @@ def make_container(element, background_color="#f5f5f5"):
 
 # Routes
 @ar_tierlist.get("/edit", name="Tierlist Editor")
-def get_tierlist_editor(htmx, selected_groups: str = "", user_token: str = ""):
-    from .images_router import images
+def get_tierlist_editor(htmx, request, session, selected_groups: str = "", tierlist_id: int = 0):
+    from .images_router import get_accessible_images
 
     logger.info(
-        f"Loading tierlist editor. User token: {user_token}, Selected groups: {selected_groups}"
+        f"Loading tierlist editor. Tierlist ID: {tierlist_id}, Selected groups: {selected_groups}"
     )
 
-    if user_token:
-        logger.info(f"Attempting to load existing tierlist for token: {user_token}")
-        tierlist = tierlists[user_token]
+    if tierlist_id:
+        logger.info(f"Attempting to load existing tierlist with id: {tierlist_id}")
+        tierlist = tierlists[tierlist_id]
         logger.debug(f"Loaded tierlist: {tierlist}")
     else:
         logger.info("Creating new tierlist")
         tierlist = DBTierlist.create_empty(selected_groups)
 
-    images_query = images(order_by="-created_at")
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+    images_query = get_accessible_images(user_id, is_admin)
     logger.debug(f"Loaded {len(images_query)} images for tierlist")
 
     content = tierlist.render_page(images_query)
     logger.info("Tierlist page rendered successfully")
 
-    return get_full_layout(content, htmx)
+    return get_full_layout(content, htmx, is_admin)
 
 
 @ar_tierlist.post("/save")
-def save_tierlist(htmx, tierlist: str, selected_groups: str):
-    logger.info("Attempting to save tierlist")
-    logger.debug(f"Received tierlist data: {tierlist}")
-    logger.debug(f"Received selected groups: {selected_groups}")
-
-    user_token = str(uuid.uuid4())
-    logger.info(f"Generated new user token: {user_token}")
-
-    tierlist_data = DBTierlist(
-        user_token=user_token,
-        name="Tierlist",
-        data=tierlist,
-        selected_groups=selected_groups,
-        created_at=datetime.now().isoformat(),
+def save_tierlist(
+    htmx,
+    request,
+    session,
+    tierlist: str,
+    selected_groups: str,
+    name: str,
+    tierlist_id: int = 0,
+):
+    owner_id = session.get("user_id")
+    logger.info(
+        f"Saving tierlist. ID: {tierlist_id}, Data: {tierlist}, Groups: {selected_groups}"
     )
 
-    try:
-        tierlists.insert(tierlist_data)
-        logger.info(f"Successfully saved tierlist with token: {user_token}")
-    except Exception as e:
-        logger.error(f"Failed to save tierlist: {e}")
-        raise
+    if tierlist_id:
+        existing = tierlists[tierlist_id]
 
-    return get_tierlist_editor(htmx, user_token=user_token, selected_groups=selected_groups)
+        if existing.owner_id != owner_id:
+            logger.warning(
+                f"User {owner_id} attempted to update tierlist {tierlist_id} owned by {existing.owner_id}"
+            )
+            return RedirectResponse("/unauthorized", status_code=303)
+
+        existing.data = tierlist
+        existing.selected_groups = selected_groups
+        existing.name = name
+        tierlists.update(existing)
+    else:
+        result = tierlists.insert(
+            {
+                "owner_id": owner_id,
+                "name": name,
+                "data": tierlist,
+                "selected_groups": selected_groups,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
+        tierlist_id = result.id
+
+    return get_tierlist_editor(
+        htmx, request, tierlist_id=tierlist_id, selected_groups=selected_groups
+    )
+
+
+@ar_tierlist.get("/list", name="My Tierlists")
+def list_tierlists(htmx, request, session):
+    owner_id = session.get("user_id")
+    tierlist_list = db.q(
+        "SELECT * FROM db_tierlist WHERE owner_id = ? ORDER BY created_at DESC",
+        [owner_id],
+    )
+    tierlist_list = [DBTierlist(**row) for row in tierlist_list]
+    content = DBTierlist.render_list(tierlist_list)
+    return get_full_layout(content, htmx, request.scope.get("is_admin", False))
+
+
+@ar_tierlist.delete("/id/{tierlist_id}")
+def delete_tierlist(tierlist_id: str, htmx, request, session):
+    owner_id = session.get("user_id")
+    tierlist = tierlists[tierlist_id]
+
+    if tierlist.owner_id != owner_id:
+        logger.warning(
+            f"User {owner_id} attempted to delete tierlist {tierlist_id} owned by {tierlist.owner_id}"
+        )
+        return RedirectResponse("/unauthorized", status_code=303)
+
+    tierlists.delete(tierlist_id)
+    return list_tierlists(htmx, request, session)
 
 
 tierlist_router = ar_tierlist
