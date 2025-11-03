@@ -81,7 +81,7 @@ def perform_nmf(ratings_matrix, n_components=3):
     return W, H.T, model
 
 
-@ar_latent.get("/select", name="Taste Insights")
+@ar_latent.get("/list", name="View Insights")
 def select_category(htmx, request, session):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
@@ -128,7 +128,7 @@ def analyze_category(category: str, htmx, request, session):
             ),
             A(
                 "Back to category selection",
-                hx_get=f"{ar_latent.prefix}/select",
+                hx_get=f"{ar_latent.prefix}/list",
                 hx_target="#main",
                 hx_push_url="true",
             ),
@@ -195,16 +195,12 @@ def analyze_category(category: str, htmx, request, session):
             ],
         )
 
+    from .users_router import get_user_avatar
+
     user_avatars = {}
     for owner_id in set(owner_ids):
-        user_data = db.q("SELECT avatar FROM user WHERE id = ?", [owner_id])
-        if user_data and user_data[0]["avatar"]:
-            avatar_hash = user_data[0]["avatar"]
-            user_avatars[owner_id] = (
-                f"https://cdn.discordapp.com/avatars/{owner_id}/{avatar_hash}.png?size=128"
-            )
-        else:
-            user_avatars[owner_id] = None
+        _, avatar_url = get_user_avatar(owner_id)
+        user_avatars[owner_id] = avatar_url
 
     your_profiles = (
         [
@@ -233,7 +229,7 @@ def analyze_category(category: str, htmx, request, session):
             H1(f"Taste Insights: {category}"),
             A(
                 "Back",
-                hx_get=f"{ar_latent.prefix}/select",
+                hx_get=f"{ar_latent.prefix}/list",
                 hx_target="#main",
                 hx_push_url="true",
                 cls="secondary",
@@ -293,6 +289,7 @@ def analyze_category(category: str, htmx, request, session):
                     for i in range(len(display_labels))
                 ],
                 cls="grid",
+                style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));",
             ),
         ),
     )

@@ -42,27 +42,15 @@ image_shares = db.create(
 )
 
 
-def migrate_categories():
-    try:
-        db.q(
-            """UPDATE db_image
-               SET category = 'unclassified'
-               WHERE category = '<no category>' OR category IS NULL OR category = ''"""
-        )
-    except Exception as e:
-        print(f"Migration warning: {e}")
-
-
-migrate_categories()
-
-
 # Router setup
 ar_images = APIRouter(prefix="/images")
 ar_images.name = "Images"
 ar_images.show = True
 
 
-def category_input(categories, input_id="category-input", value="", readonly=False, required=False):
+def category_input(
+    categories, input_id="category-input", value="", readonly=False, required=False
+):
     return Label(
         "Category",
         Input(
@@ -82,7 +70,9 @@ def category_input(categories, input_id="category-input", value="", readonly=Fal
                 )
                 for cat in categories
             ]
-        ) if not readonly and categories else None,
+        )
+        if not readonly and categories
+        else None,
     )
 
 
@@ -137,11 +127,23 @@ def get_image_thumbnail(image):
 
 def get_image_card(image, user_id: str):
     from .base_layout import tag
+    from .users_router import get_user_avatar
 
     thumbnail = get_image_thumbnail(image)
+    username, avatar_url = get_user_avatar(image.owner_id)
 
     is_owner = image.owner_id == user_id
     return Card(
+        Div(
+            Img(
+                src=avatar_url,
+                alt="avatar",
+                cls="avatar",
+                style="width: 24px; height: 24px; border-radius: 50%; vertical-align: middle;",
+            ),
+            Small(username, style="margin-left: 0.5em;"),
+            style="display: flex; align-items: center; margin-bottom: 0.5em;",
+        ),
         Img(
             src=f"data:{image.content_type};base64,{base64.b64encode(thumbnail).decode()}",
             alt=image.name,
@@ -151,13 +153,15 @@ def get_image_card(image, user_id: str):
     )
 
 
-def create_link(content, page_path):
-    return A(content, hx_get=page_path, hx_target="#main", hx_push_url="true")
-
-
 def get_image_cards(images, user_id: str):
     return [
-        create_link(get_image_card(image, user_id), f"/images/id/{image.id}")
+        Article(
+            get_image_card(image, user_id),
+            hx_get=f"/images/id/{image.id}",
+            hx_target="#main",
+            hx_push_url="true",
+            style="cursor: pointer;",
+        )
         for image in images
     ]
 
@@ -166,13 +170,15 @@ def get_image_grid(images, user_id: str):
     return Div(
         *get_image_cards(images, user_id),
         cls="grid",
-        style="grid-template-columns: repeat(auto-fill, 150px);",
+        style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));",
     )
 
 
 # Routes
 @ar_images.get("/id/{id}")
 def get_image_edit_form(id: int, htmx, request, session):
+    from .users_router import get_user_avatar
+
     image = images[id]
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
@@ -206,6 +212,7 @@ def get_image_edit_form(id: int, htmx, request, session):
     ]
 
     categories = sorted(set(img.category for img in accessible_images if img.category))
+    username, avatar_url = get_user_avatar(image.owner_id)
 
     content = (
         Header(
@@ -215,9 +222,20 @@ def get_image_edit_form(id: int, htmx, request, session):
                 hx_delete=f"{ar_images.prefix}/id/{id}",
                 hx_confirm="Delete this image?",
                 hx_target="#main",
+                hx_push_url="true",
                 cls="secondary outline",
             ),
             cls="flex-row",
+        ),
+        Div(
+            Img(
+                src=avatar_url,
+                alt="avatar",
+                cls="avatar",
+                style="width: 32px; height: 32px; border-radius: 50%; vertical-align: middle;",
+            ),
+            Strong(username, style="margin-left: 0.5em;"),
+            style="display: flex; align-items: center; margin-bottom: 1em;",
         ),
         Img(
             src=f"data:{image.content_type};base64,{base64.b64encode(image.image_data).decode()}",
@@ -262,6 +280,7 @@ def get_image_edit_form(id: int, htmx, request, session):
                     value="Submit",
                     hx_post=f"{ar_images.prefix}/id/{id}",
                     hx_target="#main",
+                    hx_push_url="true",
                     disabled=not can_edit,
                 )
                 if can_edit
@@ -321,24 +340,60 @@ def delete_image(id: int, htmx, request, session):
     return get_image_gallery(htmx, request, session)
 
 
-@ar_images.get("/add", name="Upload Images")
-def get_image_upload_form(htmx):
-    inp = Card(
-        P(Strong("Drag and drop images here")),
-        Input(
-            type="file",
-            name="uploaded_images",
-            multiple=True,
-            required=True,
-            accept="image/*",
-        ),
-        Button("Upload"),
-        align="center",
+@ar_images.get("/new", name="Upload Images")
+def get_image_upload_form(htmx, session, request):
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+
+    accessible_images = get_accessible_images(user_id, is_admin)
+    categories = sorted(set(img.category for img in accessible_images if img.category))
+
+    user_groups = db.q(
+        """
+        SELECT user_group.*
+        FROM user_group
+        JOIN user_group_membership ON user_group.id = user_group_membership.group_id
+        WHERE user_group_membership.user_id = ?
+        """,
+        [user_id],
     )
+
     add = Form(
-        inp,
+        Card(
+            P(Strong("Drag and drop images here")),
+            Input(
+                type="file",
+                name="uploaded_images",
+                multiple=True,
+                required=True,
+                accept="image/*",
+            ),
+            align="center",
+        ),
+        Fieldset(
+            category_input(categories, input_id="upload-category-input", required=True),
+            (
+                Label(
+                    "Share with groups",
+                    *[
+                        Label(
+                            Input(
+                                type="checkbox",
+                                name="shared_groups",
+                                value=str(group["id"]),
+                            ),
+                            group["groupname"],
+                        )
+                        for group in user_groups
+                    ],
+                )
+                if user_groups
+                else None
+            ),
+            Button("Upload"),
+        ),
         enctype="multipart/form-data",
-        hx_post=f"{ar_images.prefix}/add",
+        hx_post=f"{ar_images.prefix}/new",
         hx_target="#image-list",
         hx_swap="afterbegin",
         hx_on__after_request="this.reset()",
@@ -350,16 +405,21 @@ def get_image_upload_form(htmx):
         Div(
             id="image-list",
             cls="grid",
-            style="grid-template-columns: repeat(auto-fill, 150px);",
+            style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));",
         ),
     )
-    return get_full_layout(content, htmx)
+    return get_full_layout(content, htmx, is_admin)
 
 
-@ar_images.post("/add")
-async def post_image_upload_form(uploaded_images: list[UploadFile], session):
+@ar_images.post("/new")
+async def post_image_upload_form(
+    uploaded_images: list[UploadFile],
+    category: str = "",
+    shared_groups: list[str] = None,
+    session = None,
+):
     ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB limit
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024
     owner_id = session.get("user_id")
 
     try:
@@ -389,11 +449,17 @@ async def post_image_upload_form(uploaded_images: list[UploadFile], session):
                     thumbnail_data=thumbnail_data,
                     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     content_type=image.content_type,
-                    category="unclassified",
+                    category=category or "unclassified",
                 )
             )
 
         images_to_insert = [images.insert(image) for image in valid_images]
+
+        if shared_groups:
+            for img in images_to_insert:
+                for group_id in shared_groups:
+                    image_shares.insert({"image_id": img.id, "user_group_id": int(group_id)})
+
         return get_image_cards(images_to_insert, owner_id)
 
     except Exception as e:
@@ -403,14 +469,39 @@ async def post_image_upload_form(uploaded_images: list[UploadFile], session):
         )
 
 
-@ar_images.get("/all", name="View Gallery")
-def get_image_gallery(htmx, request, session):
+@ar_images.get("/list", name="View Gallery")
+def get_image_gallery(htmx, request, session, category: str = ""):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
     accessible_images = get_accessible_images(user_id, is_admin)
 
-    grid = get_image_grid(accessible_images, user_id)
-    content = (H1("Image Gallery"), grid)
+    categories = sorted(set(img.category for img in accessible_images if img.category))
+
+    if category:
+        filtered_images = [img for img in accessible_images if img.category == category]
+    else:
+        filtered_images = accessible_images
+
+    grid = get_image_grid(filtered_images, user_id)
+    content = (
+        H1("Image Gallery"),
+        Label(
+            "Filter by category",
+            Select(
+                Option("All", value="", selected=(not category)),
+                *[
+                    Option(cat, value=cat, selected=(cat == category))
+                    for cat in categories
+                ],
+                name="category",
+                hx_get=f"{ar_images.prefix}/list",
+                hx_target="#main",
+                hx_push_url="true",
+                hx_include="this",
+            ),
+        ),
+        grid,
+    )
 
     return get_full_layout(content, htmx, is_admin)
 

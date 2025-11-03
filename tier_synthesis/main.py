@@ -257,14 +257,56 @@ def get_home(htmx, request):
             "Discover patterns in character preferences and find like-minded fans.",
         ),
         Div(
-            A(
-                "Create New Tier List",
-                hx_get="/tierlist/edit",
-                hx_target="#main",
-                hx_push_url="true",
-                cls="button",
+            H2("How it works:", style="margin-top: 2em;"),
+            Article(
+                Hgroup(
+                    H3("1. Upload Images"),
+                    P(
+                        "Upload images in one of the shared categories (ex: wuwa, genshin, etc.)"
+                    ),
+                ),
+                A(
+                    "Upload Images",
+                    hx_get="/images/new",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="button",
+                    role="button",
+                ),
             ),
-            style="text-align: center; margin-top: 2em;",
+            Article(
+                Hgroup(
+                    H3("2. Create Tierlists"),
+                    P(
+                        "Create one or more tierlists within the category with the images people uploaded"
+                    ),
+                ),
+                A(
+                    "Make New Tierlist",
+                    hx_get="/tierlist/new",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="button secondary",
+                    role="button",
+                ),
+            ),
+            Article(
+                Hgroup(
+                    H3("3. Compare with your friends!"),
+                    P(
+                        "Check out an automatic report that reveals all their questionable taste"
+                    ),
+                ),
+                A(
+                    "View Taste Insights",
+                    hx_get="/insights/list",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="button secondary",
+                    role="button",
+                ),
+            ),
+            style="max-width: 800px; margin: 0 auto;",
         ),
     )
     return get_full_layout(content, htmx, request.scope.get("is_admin", False))

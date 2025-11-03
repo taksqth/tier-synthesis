@@ -70,6 +70,24 @@ users = db.create(
 )
 
 
+def get_user_avatar(owner_id: str):
+    """Get user avatar URL and username for display
+
+    Returns:
+        tuple: (username, avatar_url)
+    """
+    user_data = db.q("SELECT username, avatar FROM user WHERE id = ?", [owner_id])
+    if user_data:
+        username = user_data[0]["username"]
+        avatar_hash = user_data[0].get("avatar")
+        if avatar_hash:
+            avatar_url = f"https://cdn.discordapp.com/avatars/{owner_id}/{avatar_hash}.png?size=128"
+        else:
+            avatar_url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
+        return username, avatar_url
+    return "Unknown", "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
+
+
 ar_users = APIRouter(prefix="/admin/users")
 ar_users.name = "Users"
 

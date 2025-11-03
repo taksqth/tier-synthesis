@@ -53,8 +53,11 @@ class DBTierlist:
         user_groups: list = None,
         shared_group_ids: list = None,
     ) -> Container:
+        from .users_router import get_user_avatar
+
         filtered_images = [img for img in images if img.category == self.category]
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
+        username, avatar_url = get_user_avatar(self.owner_id)
 
         return Div(
             Header(
@@ -67,6 +70,16 @@ class DBTierlist:
                     cls="secondary",
                 ),
                 cls="flex-row",
+            ),
+            Div(
+                Img(
+                    src=avatar_url,
+                    alt="avatar",
+                    cls="avatar",
+                    style="width: 32px; height: 32px; border-radius: 50%; vertical-align: middle;",
+                ),
+                Strong(username, style="margin-left: 0.5em;"),
+                style="display: flex; align-items: center; margin-bottom: 1em;",
             ),
             self._create_save_form(can_edit, user_groups or [], shared_group_ids or []),
             P("Category: ", tag(self.category)),
@@ -168,6 +181,7 @@ class DBTierlist:
                             shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
                         }}""",
                         hx_target="#main",
+                        hx_push_url="true",
                         cls="primary",
                         id="tierlist-save-btn",
                         disabled=not can_edit,
@@ -206,7 +220,14 @@ class DBTierlist:
         )
 
     @staticmethod
-    def render_list(tierlist_list: list["DBTierlist"], user_id: str):
+    def render_list(
+        tierlist_list: list["DBTierlist"],
+        user_id: str,
+        categories: list = None,
+        selected_category: str = "",
+    ):
+        from .users_router import get_user_avatar
+
         return Div(
             Header(
                 H1("My Tierlists"),
@@ -220,9 +241,41 @@ class DBTierlist:
                 ),
                 cls="flex-row",
             ),
+            (
+                Label(
+                    "Filter by category",
+                    Select(
+                        Option("All", value="", selected=(not selected_category)),
+                        *[
+                            Option(cat, value=cat, selected=(cat == selected_category))
+                            for cat in (categories or [])
+                        ],
+                        name="category",
+                        hx_get=f"{ar_tierlist.prefix}/list",
+                        hx_target="#main",
+                        hx_push_url="true",
+                        hx_include="this",
+                    ),
+                )
+                if categories
+                else None
+            ),
             *[
                 list_item(
                     A(
+                        Div(
+                            Img(
+                                src=get_user_avatar(tierlist.owner_id)[1],
+                                alt="avatar",
+                                cls="avatar",
+                                style="width: 24px; height: 24px; border-radius: 50%; vertical-align: middle;",
+                            ),
+                            Small(
+                                get_user_avatar(tierlist.owner_id)[0],
+                                style="margin-left: 0.5em;",
+                            ),
+                            style="display: flex; align-items: center; margin-bottom: 0.5em;",
+                        ),
                         Strong(tierlist.name),
                         f" - {tierlist.created_at[:10]}",
                         Br(),
@@ -237,6 +290,7 @@ class DBTierlist:
                         hx_delete=f"{ar_tierlist.prefix}/id/{tierlist.id}",
                         hx_confirm="Delete this tierlist?",
                         hx_target="#main",
+                        hx_push_url="true",
                         cls="secondary outline",
                     )
                     if tierlist.owner_id == user_id
@@ -288,20 +342,6 @@ def get_accessible_tierlists(user_id: str, is_admin: bool):
             [user_id, user_id],
         )
     return [DBTierlist(**row) for row in result]
-
-
-def migrate_tierlists():
-    try:
-        db.q(
-            """UPDATE db_tierlist
-               SET category = 'unclassified'
-               WHERE category IS NULL OR category = ''"""
-        )
-    except Exception as e:
-        print(f"Migration warning: {e}")
-
-
-migrate_tierlists()
 
 
 # Router setup
@@ -383,6 +423,7 @@ def create_new_tierlist(htmx, request, session):
             ),
             hx_post=f"{ar_tierlist.prefix}/new",
             hx_target="#main",
+            hx_push_url="true",
         ),
     )
     return get_full_layout(content, htmx, is_admin)
@@ -503,12 +544,20 @@ def save_tierlist(
     return main_content, toast
 
 
-@ar_tierlist.get("/list", name="My Tierlists")
-def list_tierlists(htmx, request, session):
+@ar_tierlist.get("/list", name="Browse Tierlists")
+def list_tierlists(htmx, request, session, category: str = ""):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
     tierlist_list = get_accessible_tierlists(user_id, is_admin)
-    content = DBTierlist.render_list(tierlist_list, user_id)
+
+    categories = sorted(set(tl.category for tl in tierlist_list if tl.category))
+
+    if category:
+        filtered_tierlists = [tl for tl in tierlist_list if tl.category == category]
+    else:
+        filtered_tierlists = tierlist_list
+
+    content = DBTierlist.render_list(filtered_tierlists, user_id, categories, category)
     return get_full_layout(content, htmx, is_admin)
 
 

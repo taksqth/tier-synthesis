@@ -56,8 +56,9 @@ class UserGroup:
                             Input(
                                 value="Create Group",
                                 type="submit",
-                                hx_post=f"{ar_groups.prefix}/create",
+                                hx_post=f"{ar_groups.prefix}/new",
                                 hx_target="#main",
+                                hx_push_url="true",
                             ),
                         ),
                         **{"@submit": "$refs.createGroupModal.close()"},
@@ -79,6 +80,7 @@ class UserGroup:
                         hx_delete=f"{ar_groups.prefix}/id/{group.id}",
                         hx_confirm=f"Delete group {group.groupname}?",
                         hx_target="#main",
+                        hx_push_url="true",
                         cls="secondary outline",
                     ),
                 )
@@ -122,6 +124,7 @@ class UserGroup:
                                 type="submit",
                                 hx_post=f"{ar_groups.prefix}/id/{group.id}/add-member",
                                 hx_target="#main",
+                                hx_push_url="true",
                             ),
                         ),
                         **{"@submit": "$refs.addMemberModal.close()"},
@@ -160,7 +163,7 @@ def view_group(group_id: str, htmx, request):
     return get_full_layout(content, htmx, request.scope.get("is_admin", False))
 
 
-@ar_groups.post("/create")
+@ar_groups.post("/new")
 def create_group(groupname: str, htmx, request):
     user_groups.insert(UserGroup(groupname=groupname))
     logger.info(f"Create group {groupname}")
@@ -205,6 +208,7 @@ class UserGroupMembership:
                         hx_delete=f"{ar_groups.prefix}/membership/{user['membership_id']}",
                         hx_confirm=f"Remove {user['username']} from this group?",
                         hx_target="#main",
+                        hx_push_url="true",
                         cls="secondary outline",
                     ),
                 )
