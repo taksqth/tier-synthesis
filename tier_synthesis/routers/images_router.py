@@ -42,10 +42,48 @@ image_shares = db.create(
 )
 
 
+def migrate_categories():
+    try:
+        db.q(
+            """UPDATE db_image
+               SET category = 'unclassified'
+               WHERE category = '<no category>' OR category IS NULL OR category = ''"""
+        )
+    except Exception as e:
+        print(f"Migration warning: {e}")
+
+
+migrate_categories()
+
+
 # Router setup
 ar_images = APIRouter(prefix="/images")
 ar_images.name = "Images"
 ar_images.show = True
+
+
+def category_input(categories, input_id="category-input", value="", readonly=False, required=False):
+    return Label(
+        "Category",
+        Input(
+            name="category",
+            value=value,
+            placeholder="example: 'Genshin', 'HSR', etc.",
+            readonly=readonly,
+            required=required,
+            id=input_id,
+        ),
+        Small(
+            *[
+                Span(
+                    cat,
+                    cls="tag clickable",
+                    onclick=f"document.getElementById('{input_id}').value = '{cat}'",
+                )
+                for cat in categories
+            ]
+        ) if not readonly and categories else None,
+    )
 
 
 # Access control
@@ -167,6 +205,8 @@ def get_image_edit_form(id: int, htmx, request, session):
         )
     ]
 
+    categories = sorted(set(img.category for img in accessible_images if img.category))
+
     content = (
         Header(
             H1("Edit image"),
@@ -196,15 +236,7 @@ def get_image_edit_form(id: int, htmx, request, session):
                         readonly=not can_edit,
                     ),
                 ),
-                Label(
-                    "Category",
-                    Input(
-                        name="category",
-                        value=image.category,
-                        placeholder="example: 'Genshin', 'HSR', etc.",
-                        readonly=not can_edit,
-                    ),
-                ),
+                category_input(categories, value=image.category, readonly=not can_edit),
                 (
                     Label(
                         "Share with groups",
@@ -357,7 +389,7 @@ async def post_image_upload_form(uploaded_images: list[UploadFile], session):
                     thumbnail_data=thumbnail_data,
                     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     content_type=image.content_type,
-                    category="<no category>",
+                    category="unclassified",
                 )
             )
 
@@ -381,6 +413,16 @@ def get_image_gallery(htmx, request, session):
     content = (H1("Image Gallery"), grid)
 
     return get_full_layout(content, htmx, is_admin)
+
+
+@ar_images.get("/categories")
+def get_categories(request, session):
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+    accessible_images = get_accessible_images(user_id, is_admin)
+
+    categories = sorted(set(img.category for img in accessible_images if img.category))
+    return categories
 
 
 images_router = ar_images

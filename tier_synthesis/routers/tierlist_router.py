@@ -1,10 +1,8 @@
 from fasthtml.common import *
 from .base_layout import get_full_layout, list_item, tag
 from dataclasses import dataclass
-from collections import defaultdict
 from datetime import datetime
 import os
-import uuid
 import json
 import logging
 
@@ -17,27 +15,10 @@ class DBTierlist:
 
     id: int
     owner_id: str
-    selected_groups: str
+    category: str
     name: str
     data: str
     created_at: str
-
-    @classmethod
-    def create_empty(cls) -> "DBTierlist":
-        """Create a new empty tierlist"""
-        tierlist = cls(
-            owner_id="",
-            selected_groups="",
-            name="New Tierlist",
-            data=json.dumps({tier: [] for tier in cls.TIERS}),
-            created_at=datetime.now().isoformat(),
-        )
-        logger.debug(f"Created empty tierlist: {tierlist}")
-        return tierlist
-
-    def get_selected_groups(self) -> list[str]:
-        """Get list of selected groups"""
-        return self.selected_groups.split(",") if self.selected_groups else []
 
     def get_tier_data(self, images: list) -> dict:
         """Get tierlist data with image elements"""
@@ -55,13 +36,6 @@ class DBTierlist:
                 leftover_images.append(self._get_image_element(image))
         return result, leftover_images
 
-    def _get_selected_groups_js(self) -> str:
-        """Get JavaScript to extract selected groups from the DOM"""
-        return """Array.from(
-            document.querySelector('details[name="selected_groups"]')
-                .querySelectorAll('input[type="checkbox"]:checked')
-        ).map(cb => cb.value).join(',')"""
-
     def _get_tierlist_data_js(self) -> str:
         """Get JavaScript to extract tierlist data from the DOM"""
         return """Object.fromEntries(
@@ -72,22 +46,19 @@ class DBTierlist:
             ])
         )"""
 
-    def render_page(self, images: list) -> Container:
-        """Render the full tierlist editor page"""
-        categories = set(image.category for image in images)
-        selected_groups = self.get_selected_groups()
-
-        filtered_images = [
-            image
-            for image in images
-            if not selected_groups or image.category in selected_groups
-        ]
-
+    def render_page(
+        self,
+        images: list,
+        can_edit: bool = True,
+        user_groups: list = None,
+        shared_group_ids: list = None,
+    ) -> Container:
+        filtered_images = [img for img in images if img.category == self.category]
         tierlist_data, leftover_images = self.get_tier_data(filtered_images)
 
         return Div(
             Header(
-                H1("Image Tier List"),
+                H1("Image Tier List" + (" (Read Only)" if not can_edit else "")),
                 Button(
                     "Back to tierlists",
                     hx_get=f"{ar_tierlist.prefix}/list",
@@ -97,14 +68,10 @@ class DBTierlist:
                 ),
                 cls="flex-row",
             ),
-            self._create_save_form(),
-            self._create_group_selector(categories, selected_groups),
-            P(
-                "Currently filtering: ",
-                Em(", ".join(selected_groups) if selected_groups else "All categories"),
-            ),
+            self._create_save_form(can_edit, user_groups or [], shared_group_ids or []),
+            P("Category: ", tag(self.category)),
             *[
-                self._create_tier_row(tier, tierlist_data[tier])
+                self._create_tier_row(tier, can_edit, tierlist_data[tier])
                 for tier in tierlist_data.keys()
             ],
             H2("Available Images"),
@@ -112,7 +79,8 @@ class DBTierlist:
                 Div(
                     *leftover_images,
                     cls="grid",
-                )
+                ),
+                can_edit,
             ),
             Script("""
                 (function() {
@@ -143,9 +111,7 @@ class DBTierlist:
                     });
                 })();
             """),
-            **{
-                "x-data": f"{{ dragging: null, selectedGroups: {json.dumps(selected_groups)}, saving: false, hasUnsavedChanges: false }}"
-            },
+            **{"x-data": "{ dragging: null, saving: false, hasUnsavedChanges: false }"},
         )
 
     def _get_image_element(self, image):
@@ -166,7 +132,7 @@ class DBTierlist:
             )
         )
 
-    def _create_tier_row(self, tier: str, images: list = None):
+    def _create_tier_row(self, tier: str, can_edit: bool, images: list = None):
         """Create a tier row"""
         return Div(
             H2(tier),
@@ -176,11 +142,12 @@ class DBTierlist:
                     cls="grid",
                     data_tier=tier,
                 ),
+                can_edit,
             ),
         )
 
-    def _create_save_form(self):
-        return (
+    def _create_save_form(self, can_edit, user_groups, shared_group_ids):
+        return Fieldset(
             Label(
                 "Name",
                 Group(
@@ -189,67 +156,57 @@ class DBTierlist:
                         value=self.name,
                         placeholder="My Tierlist",
                         id="tierlist-name-input",
-                        **{"@input": "hasUnsavedChanges = true"},
+                        readonly=not can_edit,
+                        **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
                     ),
                     Button(
                         "Save",
                         hx_post=f"{ar_tierlist.prefix}/id/{self.id}",
                         hx_vals=f"""js:{{
                             tierlist_data: {self._get_tierlist_data_js()},
-                            selected_groups: {self._get_selected_groups_js()},
                             name: document.getElementById('tierlist-name-input').value,
+                            shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
                         }}""",
                         hx_target="#main",
                         cls="primary",
                         id="tierlist-save-btn",
+                        disabled=not can_edit,
                         **{
                             "x-bind:aria-busy": "saving",
                             "@htmx:before-request": "saving = true; hasUnsavedChanges = false",
                             "@htmx:after-request": "saving = false",
-                        },
+                        }
+                        if can_edit
+                        else {},
                     ),
                     cls="flex-row",
                 ),
             ),
-        )
-
-    def _create_group_selector(self, categories, selected_groups):
-        """Create category selector using Alpine.js for state management"""
-        return Group(
-            Details(
-                Summary("Select Categories"),
-                Ul(
+            (
+                Label(
+                    "Share with groups",
                     *[
-                        Li(
-                            Label(
-                                Input(
-                                    type="checkbox",
-                                    name="category",
-                                    value=category,
-                                    **{"x-model": "selectedGroups"},
-                                ),
-                                category,
-                            )
+                        Label(
+                            Input(
+                                type="checkbox",
+                                name="shared_groups",
+                                value=str(group["id"]),
+                                checked=group["id"] in shared_group_ids,
+                                disabled=not can_edit,
+                            ),
+                            group["groupname"],
                         )
-                        for category in categories
-                    ]
-                ),
-                name="selected_groups",
-                cls="dropdown",
-            ),
-            Button(
-                "Apply",
-                hx_get=f"{ar_tierlist.prefix}/id/{self.id}",
-                hx_vals=f"""js:{{
-                    selected_groups: {self._get_selected_groups_js()}
-                }}""",
-                hx_target="#main",
+                        for group in user_groups
+                    ],
+                    **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
+                )
+                if user_groups
+                else None
             ),
         )
 
     @staticmethod
-    def render_list(tierlist_list: list["DBTierlist"]):
-        """Render list of tierlists for the current user"""
+    def render_list(tierlist_list: list["DBTierlist"], user_id: str):
         return Div(
             Header(
                 H1("My Tierlists"),
@@ -268,8 +225,9 @@ class DBTierlist:
                     A(
                         Strong(tierlist.name),
                         f" - {tierlist.created_at[:10]}",
-                        Br() if tierlist.get_selected_groups() else None,
-                        *[tag(group) for group in tierlist.get_selected_groups()],
+                        Br(),
+                        tag(tierlist.category),
+                        tag("Owned" if tierlist.owner_id == user_id else "Shared"),
                         hx_get=f"{ar_tierlist.prefix}/id/{tierlist.id}",
                         hx_target="#main",
                         hx_push_url="true",
@@ -280,13 +238,22 @@ class DBTierlist:
                         hx_confirm="Delete this tierlist?",
                         hx_target="#main",
                         cls="secondary outline",
-                    ),
+                    )
+                    if tierlist.owner_id == user_id
+                    else None,
                 )
                 for tierlist in tierlist_list
             ]
             if tierlist_list
             else P("No tierlists yet. Create one to get started!"),
         )
+
+
+@dataclass
+class TierlistShare:
+    id: int
+    tierlist_id: int
+    user_group_id: int
 
 
 db = database(os.environ.get("DB_PATH", "app/database.db"))
@@ -296,6 +263,45 @@ tierlists = db.create(
     foreign_keys=[("owner_id", "user")],
     transform=True,
 )
+tierlist_shares = db.create(
+    TierlistShare,
+    pk="id",
+    foreign_keys=(("tierlist_id", "db_tierlist"), ("user_group_id", "user_group")),
+    transform=True,
+)
+
+
+def get_accessible_tierlists(user_id: str, is_admin: bool):
+    if is_admin:
+        result = db.q("SELECT * FROM db_tierlist ORDER BY created_at DESC")
+    else:
+        result = db.q(
+            """
+            SELECT DISTINCT db_tierlist.*
+            FROM db_tierlist
+            LEFT JOIN tierlist_share ON db_tierlist.id = tierlist_share.tierlist_id
+            LEFT JOIN user_group_membership ON tierlist_share.user_group_id = user_group_membership.group_id
+            WHERE db_tierlist.owner_id = ?
+               OR user_group_membership.user_id = ?
+            ORDER BY db_tierlist.created_at DESC
+            """,
+            [user_id, user_id],
+        )
+    return [DBTierlist(**row) for row in result]
+
+
+def migrate_tierlists():
+    try:
+        db.q(
+            """UPDATE db_tierlist
+               SET category = 'unclassified'
+               WHERE category IS NULL OR category = ''"""
+        )
+    except Exception as e:
+        print(f"Migration warning: {e}")
+
+
+migrate_tierlists()
 
 
 # Router setup
@@ -316,7 +322,7 @@ def make_draggable(element):
     )
 
 
-def make_container(element, background_color="#f5f5f5"):
+def make_container(element, can_edit, background_color="#f5f5f5"):
     """Create a draggable container with drop zone functionality using Alpine.js"""
     return element(
         **{
@@ -331,7 +337,9 @@ def make_container(element, background_color="#f5f5f5"):
                     $event.currentTarget.insertBefore(dragging, $event.currentTarget.firstChild);
                     hasUnsavedChanges = true;
                 }
-            """,
+            """
+            if can_edit
+            else "",
         },
         style=(element.style if element.style else "")
         + f"""
@@ -349,8 +357,49 @@ def make_container(element, background_color="#f5f5f5"):
 # Routes
 @ar_tierlist.get("/new", name="Make new tierlist")
 def create_new_tierlist(htmx, request, session):
-    tierlist = DBTierlist.create_empty()
-    tierlist.owner_id = session.get("user_id")
+    from .images_router import get_accessible_images, category_input
+
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+    accessible_images = get_accessible_images(user_id, is_admin)
+    categories = sorted(set(img.category for img in accessible_images if img.category))
+
+    content = Div(
+        H1("Create New Tierlist"),
+        Form(
+            Fieldset(
+                Label(
+                    "Name",
+                    Input(
+                        name="name",
+                        required=True,
+                        placeholder="My Tierlist",
+                    ),
+                ),
+                category_input(
+                    categories, input_id="new-tierlist-category", required=True
+                ),
+                Button("Create", type="submit"),
+            ),
+            hx_post=f"{ar_tierlist.prefix}/new",
+            hx_target="#main",
+        ),
+    )
+    return get_full_layout(content, htmx, is_admin)
+
+
+@ar_tierlist.post("/new")
+def post_new_tierlist(name: str, category: str, htmx, request, session):
+    owner_id = session.get("user_id")
+
+    tierlist = DBTierlist(
+        id=None,
+        owner_id=owner_id,
+        category=category,
+        name=name,
+        data=json.dumps({tier: [] for tier in DBTierlist.TIERS}),
+        created_at=datetime.now().isoformat(),
+    )
     tierlist = tierlists.insert(tierlist)
 
     return get_tierlist_editor(tierlist.id, htmx, request, session)
@@ -361,13 +410,43 @@ def get_tierlist_editor(id: int, htmx, request, session):
     from .images_router import get_accessible_images
 
     tierlist = tierlists[id]
-
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
+
+    accessible_tierlists = get_accessible_tierlists(user_id, is_admin)
+    if not any(tl.id == id for tl in accessible_tierlists):
+        return get_full_layout(
+            H1("Access Denied"),
+            P("You don't have access to this tierlist."),
+            htmx,
+            is_admin,
+        )
+
+    can_edit = tierlist.owner_id == user_id or is_admin
+
+    user_groups = db.q(
+        """
+        SELECT user_group.*
+        FROM user_group
+        JOIN user_group_membership ON user_group.id = user_group_membership.group_id
+        WHERE user_group_membership.user_id = ?
+        """,
+        [user_id],
+    )
+
+    shared_group_ids = [
+        row["user_group_id"]
+        for row in db.q(
+            "SELECT user_group_id FROM tierlist_share WHERE tierlist_id = ?", [id]
+        )
+    ]
+
     images_query = get_accessible_images(user_id, is_admin)
     logger.debug(f"Loaded {len(images_query)} images for tierlist")
 
-    content = tierlist.render_page(images_query)
+    content = tierlist.render_page(
+        images_query, can_edit, user_groups, shared_group_ids
+    )
     logger.info("Tierlist page rendered successfully")
 
     return get_full_layout(content, htmx, is_admin)
@@ -377,29 +456,35 @@ def get_tierlist_editor(id: int, htmx, request, session):
 def save_tierlist(
     id: int,
     tierlist_data: str,
-    selected_groups: str,
     name: str,
+    shared_groups: str,
     htmx,
     request,
     session,
 ):
     owner_id = session.get("user_id")
-    logger.debug(
-        f"Saving tierlist. ID: {id}, Data: {tierlist_data}, Groups: {selected_groups}"
-    )
+    is_admin = request.scope.get("is_admin", False)
+    logger.debug(f"Saving tierlist. ID: {id}, Data: {tierlist_data}")
 
     tierlist = tierlists[id]
 
-    if tierlist.owner_id != owner_id:
+    if tierlist.owner_id != owner_id and not is_admin:
         logger.warning(
-            f"User {owner_id} attempted to update tierlist {id} owned by {existing.owner_id}"
+            f"User {owner_id} attempted to update tierlist {id} owned by {tierlist.owner_id}"
         )
         return RedirectResponse("/unauthorized", status_code=303)
 
     tierlist.data = tierlist_data
-    tierlist.selected_groups = selected_groups
     tierlist.name = name
     tierlists.update(tierlist)
+
+    db.q("DELETE FROM tierlist_share WHERE tierlist_id = ?", [id])
+    if shared_groups:
+        for group_id in shared_groups.split(","):
+            if group_id:
+                tierlist_shares.insert(
+                    {"tierlist_id": id, "user_group_id": int(group_id)}
+                )
 
     main_content = get_tierlist_editor(id, htmx, request, session)
     toast = Div(
@@ -412,7 +497,7 @@ def save_tierlist(
         """),
         id="toast",
         cls="show",
-        **{"hx-swap-oob": "true"}
+        **{"hx-swap-oob": "true"},
     )
 
     return main_content, toast
@@ -420,14 +505,11 @@ def save_tierlist(
 
 @ar_tierlist.get("/list", name="My Tierlists")
 def list_tierlists(htmx, request, session):
-    owner_id = session.get("user_id")
-    tierlist_list = db.q(
-        "SELECT * FROM db_tierlist WHERE owner_id = ? ORDER BY created_at DESC",
-        [owner_id],
-    )
-    tierlist_list = [DBTierlist(**row) for row in tierlist_list]
-    content = DBTierlist.render_list(tierlist_list)
-    return get_full_layout(content, htmx, request.scope.get("is_admin", False))
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+    tierlist_list = get_accessible_tierlists(user_id, is_admin)
+    content = DBTierlist.render_list(tierlist_list, user_id)
+    return get_full_layout(content, htmx, is_admin)
 
 
 @ar_tierlist.delete("/id/{id}")

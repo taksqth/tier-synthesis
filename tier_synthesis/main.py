@@ -104,8 +104,14 @@ app, rt = fast_app(
     hdrs=(
         picolink,
         [
-            Meta(name="description", content="Create, share, and analyze character tier lists collaboratively. Discover patterns in character preferences and find like-minded fans."),
-            Link(rel="stylesheet", href="/static/styles.css"),
+            Meta(
+                name="description",
+                content="Create, share, and analyze character tier lists collaboratively. Discover patterns in character preferences and find like-minded fans.",
+            ),
+            Link(
+                rel="stylesheet",
+                href=f"/static/styles.css?v={os.environ.get('RAILWAY_GIT_COMMIT_SHA', '1')[:8]}",
+            ),
             Script(
                 type="module", src="https://cdn.jsdelivr.net/npm/zero-md@3?register"
             ),
