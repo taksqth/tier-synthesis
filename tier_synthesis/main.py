@@ -100,6 +100,10 @@ def _server_error(req, exc):
     return content
 
 
+def on_startup():
+    from migrations import run_migrations
+    run_migrations()
+
 app, rt = fast_app(
     hdrs=(
         picolink,
@@ -123,6 +127,7 @@ app, rt = fast_app(
     ),
     htmlkw={"lang": "en"},
     before=bware,
+    on_startup=[on_startup],
     exception_handlers={404: _not_found, 500: _server_error},
     debug=os.environ.get("DEBUG", "false").lower() == "true",
 )

@@ -75,25 +75,55 @@ def category_input(
     )
 
 
-# Access control
-def get_accessible_images(user_id: str, is_admin: bool):
-    """Get images the user can access (owned, shared with their groups, or user is admin)"""
+def can_access_image(image_id: int, user_id: str, is_admin: bool):
     if is_admin:
-        result = db.q("SELECT * FROM db_image ORDER BY created_at DESC")
+        return True
+
+    result = db.q(
+        """
+        SELECT 1 FROM db_image i
+        LEFT JOIN image_share s ON i.id = s.image_id
+        LEFT JOIN user_group_membership m ON s.user_group_id = m.group_id
+        WHERE i.id = ? AND (i.owner_id = ? OR m.user_id = ?)
+        LIMIT 1
+        """,
+        [image_id, user_id, user_id]
+    )
+    return len(result) > 0
+
+
+def get_accessible_images(user_id: str, is_admin: bool, with_blobs: bool = True):
+    cols = "*" if with_blobs else "id, owner_id, name, category, content_type, created_at"
+
+    if is_admin:
+        result = db.q(f"SELECT {cols} FROM db_image ORDER BY created_at DESC")
     else:
+        qualified = f"i.{cols.replace(', ', ', i.')}" if not with_blobs else "i.*"
         result = db.q(
-            """
-            SELECT DISTINCT db_image.*
-            FROM db_image
-            LEFT JOIN image_share ON db_image.id = image_share.image_id
-            LEFT JOIN user_group_membership ON image_share.user_group_id = user_group_membership.group_id
-            WHERE db_image.owner_id = ?
-               OR user_group_membership.user_id = ?
-            ORDER BY db_image.created_at DESC
+            f"""
+            SELECT DISTINCT {qualified}
+            FROM db_image i
+            LEFT JOIN image_share s ON i.id = s.image_id
+            LEFT JOIN user_group_membership m ON s.user_group_id = m.group_id
+            WHERE i.owner_id = ? OR m.user_id = ?
+            ORDER BY i.created_at DESC
             """,
             [user_id, user_id],
         )
-    return [DBImage(**row) for row in result]
+
+    if with_blobs:
+        return [DBImage(**row) for row in result]
+
+    return [DBImage(
+        id=row["id"],
+        owner_id=row["owner_id"],
+        name=row["name"],
+        category=row["category"],
+        image_data=b"",
+        thumbnail_data=b"",
+        content_type=row["content_type"],
+        created_at=row["created_at"]
+    ) for row in result]
 
 
 # Utility and component functions
@@ -149,7 +179,6 @@ def get_image_card(image, user_id: str):
     from .base_layout import tag
     from .users_router import get_user_avatar
 
-    thumbnail = get_image_thumbnail(image)
     username, avatar_url = get_user_avatar(image.owner_id)
 
     is_owner = image.owner_id == user_id
@@ -165,7 +194,7 @@ def get_image_card(image, user_id: str):
             style="display: flex; align-items: center; margin-bottom: 0.5em;",
         ),
         Img(
-            src=f"data:{image.content_type};base64,{base64.b64encode(thumbnail).decode()}",
+            src=f"/images/thumbnail/{image.id}",
             alt=image.name,
         ),
         P(image.name),
@@ -194,23 +223,43 @@ def get_image_grid(images, user_id: str):
     )
 
 
-# Routes
+@ar_images.get("/thumbnail/{id}")
+def serve_thumbnail(id: int, session, request):
+    user_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+
+    if not can_access_image(id, user_id, is_admin):
+        return Response("Forbidden", status_code=403)
+
+    image = images[id]
+    thumbnail = get_image_thumbnail(image)
+
+    return Response(
+        content=thumbnail,
+        media_type=image.content_type,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": f'"{id}-{hash(image.created_at)}"'
+        }
+    )
+
+
 @ar_images.get("/id/{id}")
 def get_image_edit_form(id: int, htmx, request, session):
     from .users_router import get_user_avatar
 
-    image = images[id]
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
 
-    accessible_images = get_accessible_images(user_id, is_admin)
-    if not any(img.id == id for img in accessible_images):
+    if not can_access_image(id, user_id, is_admin):
         return get_full_layout(
             H1("Access Denied"),
             P("You don't have access to this image."),
             htmx,
             is_admin,
         )
+
+    image = images[id]
 
     can_edit = image.owner_id == user_id or is_admin
 
@@ -331,6 +380,8 @@ async def post_image_edit_form(
     shared_groups: list[str] = None,
     new_uploaded_image: UploadFile = None,
 ):
+    from .category_utils import validate_and_get_category
+
     image = images[id]
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
@@ -345,8 +396,13 @@ async def post_image_edit_form(
             is_admin,
         )
 
+    try:
+        validated_category = validate_and_get_category(category)
+    except ValueError as e:
+        return get_full_layout(P(f"Category error: {e}", style="color: red;"), htmx, is_admin)
+
     image.name = name
-    image.category = category
+    image.category = validated_category
 
     if new_uploaded_image:
         image_data = await get_safe_image_data(new_uploaded_image)
@@ -381,11 +437,11 @@ def delete_image(id: int, htmx, request, session):
 
 @ar_images.get("/new", name="Upload Images")
 def get_image_upload_form(htmx, session, request):
+    from .category_utils import get_all_categories
+
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
-
-    accessible_images = get_accessible_images(user_id, is_admin)
-    categories = sorted(set(img.category for img in accessible_images if img.category))
+    categories = get_all_categories()
 
     user_groups = db.q(
         """
@@ -457,7 +513,14 @@ async def post_image_upload_form(
     category: str = "",
     shared_groups: list[str] = None,
 ):
+    from .category_utils import validate_and_get_category
+
     owner_id = session.get("user_id")
+
+    try:
+        validated_category = validate_and_get_category(category or "unclassified")
+    except ValueError as e:
+        return P(f"Category error: {e}", style="color: red;")
 
     valid_images = []
     for image in uploaded_images:
@@ -472,7 +535,7 @@ async def post_image_upload_form(
                 thumbnail_data=thumbnail_data,
                 created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 content_type=image.content_type,
-                category=category or "unclassified",
+                category=validated_category,
             )
         )
 
@@ -490,11 +553,12 @@ async def post_image_upload_form(
 
 @ar_images.get("/list", name="View Gallery")
 def get_image_gallery(htmx, request, session, category: str = "", mine_only: str = ""):
+    from .category_utils import get_all_categories
+
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
-    accessible_images = get_accessible_images(user_id, is_admin)
-
-    categories = sorted(set(img.category for img in accessible_images if img.category))
+    accessible_images = get_accessible_images(user_id, is_admin, with_blobs=False)
+    categories = get_all_categories()
 
     if category and category != "All":
         filtered_images = [img for img in accessible_images if img.category == category]
@@ -546,12 +610,8 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
 
 @ar_images.get("/categories")
 def get_categories(request, session):
-    user_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
-    accessible_images = get_accessible_images(user_id, is_admin)
-
-    categories = sorted(set(img.category for img in accessible_images if img.category))
-    return categories
+    from .category_utils import get_all_categories
+    return get_all_categories()
 
 
 images_router = ar_images

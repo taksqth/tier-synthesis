@@ -128,15 +128,10 @@ class DBTierlist:
         )
 
     def _get_image_element(self, image):
-        """Create image element for tierlist"""
-        from .images_router import get_image_thumbnail
-        import base64
-
-        image_thumbnail = get_image_thumbnail(image)
         return make_draggable(
             Div(
                 Img(
-                    src=f"data:{image.content_type};base64,{base64.b64encode(image_thumbnail).decode()}",
+                    src=f"/images/thumbnail/{image.id}",
                     alt=image.name,
                     draggable="false",
                     style="pointer-events: none;",
@@ -444,12 +439,12 @@ def make_container(element, can_edit, background_color="#f5f5f5"):
 # Routes
 @ar_tierlist.get("/new", name="Make new tierlist")
 def create_new_tierlist(htmx, request, session):
-    from .images_router import get_accessible_images, category_input
+    from .images_router import category_input
+    from .category_utils import get_all_categories
 
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
-    accessible_images = get_accessible_images(user_id, is_admin)
-    categories = sorted(set(img.category for img in accessible_images if img.category))
+    categories = get_all_categories()
 
     content = Div(
         H1("Create New Tierlist"),
@@ -478,12 +473,20 @@ def create_new_tierlist(htmx, request, session):
 
 @ar_tierlist.post("/new")
 def post_new_tierlist(name: str, category: str, htmx, request, session):
+    from .category_utils import validate_and_get_category
+
     owner_id = session.get("user_id")
+    is_admin = request.scope.get("is_admin", False)
+
+    try:
+        validated_category = validate_and_get_category(category)
+    except ValueError as e:
+        return get_full_layout(P(f"Category error: {e}", style="color: red;"), htmx, is_admin)
 
     tierlist = DBTierlist(
         id=None,
         owner_id=owner_id,
-        category=category,
+        category=validated_category,
         name=name,
         data=json.dumps({tier: [] for tier in DBTierlist.TIERS}),
         created_at=datetime.now().isoformat(),
@@ -529,7 +532,7 @@ def get_tierlist_editor(id: int, htmx, request, session):
         )
     ]
 
-    images_query = get_accessible_images(user_id, is_admin)
+    images_query = get_accessible_images(user_id, is_admin, with_blobs=False)
     logger.debug(f"Loaded {len(images_query)} images for tierlist")
 
     content = tierlist.render_page(

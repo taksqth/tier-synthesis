@@ -30,11 +30,23 @@ def tierlist_to_ratings(tierlist_data):
     return ratings
 
 
+def get_shared_group_users(user_id):
+    result = db.q(
+        """
+        SELECT DISTINCT ugm2.user_id
+        FROM user_group_membership ugm1
+        JOIN user_group_membership ugm2 ON ugm1.group_id = ugm2.group_id
+        WHERE ugm1.user_id = ?
+        """,
+        [user_id]
+    )
+    return {row["user_id"] for row in result}
+
+
 def build_ratings_matrix(category, user_id, is_admin):
     from .tierlist_router import get_accessible_tierlists
-    from .users_router import users_share_group
 
-    accessible_images = get_accessible_images(user_id, is_admin)
+    accessible_images = get_accessible_images(user_id, is_admin, with_blobs=False)
     category_images = [img for img in accessible_images if img.category == category]
 
     if not category_images:
@@ -49,6 +61,7 @@ def build_ratings_matrix(category, user_id, is_admin):
     if not category_tierlists:
         return None, None, None
 
+    shared_users = get_shared_group_users(user_id)
     tierlist_labels = []
     ratings_list = []
 
@@ -63,13 +76,8 @@ def build_ratings_matrix(category, user_id, is_admin):
                 has_ratings = True
 
         if has_ratings:
-            tierlist_labels.append(
-                (
-                    tierlist.owner_id,
-                    tierlist.name,
-                    users_share_group(user_id, tierlist.owner_id),
-                )
-            )
+            shares_group = tierlist.owner_id in shared_users or tierlist.owner_id == user_id
+            tierlist_labels.append((tierlist.owner_id, tierlist.name, shares_group))
             ratings_list.append(rating_vector)
 
     if len(ratings_list) < 2:
@@ -94,7 +102,25 @@ def perform_nmf(ratings_matrix, n_components=3):
 
 
 def get_user_avatars_map(owner_ids):
-    return {owner_id: get_user_avatar(owner_id)[1] for owner_id in set(owner_ids)}
+    unique_ids = list(set(owner_ids))
+    if not unique_ids:
+        return {}
+
+    placeholders = ','.join(['?'] * len(unique_ids))
+    users_data = db.q(
+        f"SELECT id, username, avatar FROM user WHERE id IN ({placeholders})",
+        unique_ids
+    )
+
+    result = {}
+    for user in users_data:
+        avatar_hash = user.get("avatar")
+        if avatar_hash:
+            result[user["id"]] = f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar_hash}.png?size=128"
+        else:
+            result[user["id"]] = DEFAULT_AVATAR
+
+    return result
 
 
 def get_display_labels(tierlist_labels, user_map):
@@ -153,12 +179,10 @@ def render_taste_profile_card(preferences, label, avatar_url, n_components):
 
 
 def render_image_latent_card(image, latent_scores, n_components, user_id):
-    import base64
     from .base_layout import tag
     from .users_router import get_user_avatar
 
     username, avatar_url = get_user_avatar(image.owner_id)
-    thumbnail_data = image.thumbnail_data or image.image_data
 
     return Card(
         Div(
@@ -173,7 +197,7 @@ def render_image_latent_card(image, latent_scores, n_components, user_id):
         ),
         A(
             Img(
-                src=f"data:{image.content_type};base64,{base64.b64encode(thumbnail_data).decode()}",
+                src=f"/images/thumbnail/{image.id}",
                 alt=image.name,
                 style="width: 100%; cursor: pointer;",
             ),
@@ -200,8 +224,6 @@ def render_image_latent_card(image, latent_scores, n_components, user_id):
 
 
 def render_theme_images(top_images_per_theme, n_components, category):
-    import base64
-
     return [
         Article(
             H3(f"Theme {i + 1}"),
@@ -209,7 +231,7 @@ def render_theme_images(top_images_per_theme, n_components, category):
             Div(
                 *[
                     Img(
-                        src=f"data:{img.content_type};base64,{base64.b64encode(img.thumbnail_data or img.image_data).decode()}",
+                        src=f"/images/thumbnail/{img.id}",
                         alt=img.name,
                         cls="theme-thumbnail",
                     )
@@ -248,6 +270,9 @@ def render_your_profiles_section(
     if not current_user_indices:
         return None
 
+    total = len(current_user_indices)
+    shown_indices = current_user_indices[:5]
+
     your_profiles = [
         render_taste_profile_card(
             W_normalized[i],
@@ -255,11 +280,13 @@ def render_your_profiles_section(
             _get_avatar_for_profile(tierlist_labels[i], user_avatars),
             n_components,
         )
-        for i in current_user_indices
+        for i in shown_indices
     ]
 
+    title = f"Your Taste Profile ({len(shown_indices)} of {total})" if total > 5 else "Your Taste Profile"
+
     return Div(
-        H2("Your Taste Profile"),
+        H2(title),
         Div(*your_profiles, cls="grid"),
         H3("Similar Tastes"),
         Ul(*[Li(f"{label} ({sim}% similar)") for label, sim in similar_tierlists[:3]])
@@ -309,34 +336,40 @@ def render_insufficient_data_page(category, htmx, is_admin):
     )
 
 
-def get_category_stats(category, user_id, is_admin):
-    """Get statistics for a category (image count, tierlist count, contributor count)."""
-    from .tierlist_router import get_accessible_tierlists
-
-    accessible_images = get_accessible_images(user_id, is_admin)
-    image_count = len([img for img in accessible_images if img.category == category])
-
-    tierlists = get_accessible_tierlists(user_id, is_admin, fetch_all=True)
-    category_tierlists = [tl for tl in tierlists if tl.category == category]
-    tierlist_count = len(category_tierlists)
-
-    contributor_count = len(set(tl.owner_id for tl in category_tierlists))
-
-    return image_count, tierlist_count, contributor_count
-
-
 @ar_latent.get("/list", name="View Insights")
 def select_category(htmx, request, session):
+    from .tierlist_router import get_accessible_tierlists
+    from .category_utils import get_all_categories
+
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
-    accessible_images = get_accessible_images(user_id, is_admin)
-    categories = sorted(set(img.category for img in accessible_images if img.category))
+    accessible_tierlists = get_accessible_tierlists(user_id, is_admin, fetch_all=True)
+    categories = get_all_categories()
+
+    if is_admin:
+        img_counts = {row['category']: row['count'] for row in db.q(
+            "SELECT category, COUNT(*) as count FROM db_image WHERE category IS NOT NULL GROUP BY category"
+        )}
+    else:
+        img_counts = {row['category']: row['count'] for row in db.q(
+            """
+            SELECT i.category, COUNT(DISTINCT i.id) as count
+            FROM db_image i
+            LEFT JOIN image_share s ON i.id = s.image_id
+            LEFT JOIN user_group_membership m ON s.user_group_id = m.group_id
+            WHERE (i.owner_id = ? OR m.user_id = ?) AND i.category IS NOT NULL
+            GROUP BY i.category
+            """,
+            [user_id, user_id]
+        )}
 
     category_cards = []
     for cat in categories:
-        img_count, tierlist_count, people_count = get_category_stats(
-            cat, user_id, is_admin
-        )
+        cat_tierlists = [tl for tl in accessible_tierlists if tl.category == cat]
+        img_count = img_counts.get(cat, 0)
+        tierlist_count = len(cat_tierlists)
+        people_count = len(set(tl.owner_id for tl in cat_tierlists))
+
         category_cards.append(
             Article(
                 A(
