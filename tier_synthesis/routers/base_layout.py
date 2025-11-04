@@ -97,6 +97,12 @@ def get_full_layout(content, htmx, is_admin=False):
                             details.removeAttribute('open');
                         });
                     });
+
+                    document.addEventListener('click', function(event) {
+                        if (event.target.tagName === 'DIALOG') {
+                            event.target.close();
+                        }
+                    });
                 })();
             """),
         )

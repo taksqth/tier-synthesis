@@ -294,7 +294,9 @@ def analyze_category(category: str, htmx, request, session):
                     create_taste_profile(
                         W_normalized[i],
                         display_labels[i],
-                        user_avatars.get(tierlist_labels[i][0]),
+                        user_avatars.get(tierlist_labels[i][0])
+                        if tierlist_labels[i][2]
+                        else get_anonymous_avatar()[1],
                     )
                     for i in range(len(display_labels))
                 ],
