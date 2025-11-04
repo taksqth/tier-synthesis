@@ -225,6 +225,7 @@ class DBTierlist:
         user_id: str,
         categories: list = None,
         selected_category: str = "",
+        mine_only: bool = False,
     ):
         from .users_router import get_user_avatar
 
@@ -241,23 +242,42 @@ class DBTierlist:
                 ),
                 cls="flex-row",
             ),
-            (
+            Div(
+                (
+                    Label(
+                        "Filter by category",
+                        Select(
+                            Option("All", value="", selected=(not selected_category)),
+                            *[
+                                Option(
+                                    cat, value=cat, selected=(cat == selected_category)
+                                )
+                                for cat in (categories or [])
+                            ],
+                            name="category",
+                            hx_get=f"{ar_tierlist.prefix}/list",
+                            hx_target="#main",
+                            hx_include="[name='mine_only']",
+                            hx_push_url="true",
+                        ),
+                    )
+                    if categories
+                    else None
+                ),
                 Label(
-                    "Filter by category",
-                    Select(
-                        Option("All", value="", selected=(not selected_category)),
-                        *[
-                            Option(cat, value=cat, selected=(cat == selected_category))
-                            for cat in (categories or [])
-                        ],
-                        name="category",
+                    Input(
+                        type="checkbox",
+                        name="mine_only",
+                        value="true",
+                        checked=mine_only,
                         hx_get=f"{ar_tierlist.prefix}/list",
                         hx_target="#main",
-                        hx_include="this",
+                        hx_include="[name='category']",
+                        hx_push_url="true",
                     ),
-                )
-                if categories
-                else None
+                    "Show only mine",
+                ),
+                style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
             ),
             *[
                 list_item(
@@ -572,19 +592,24 @@ def save_tierlist(
 
 
 @ar_tierlist.get("/list", name="Browse Tierlists")
-def list_tierlists(htmx, request, session, category: str = ""):
+def list_tierlists(htmx, request, session, category: str = "", mine_only: str = ""):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
     tierlist_list = get_accessible_tierlists(user_id, is_admin)
 
     categories = sorted(set(tl.category for tl in tierlist_list if tl.category))
 
-    if category:
+    if category and category != "All":
         filtered_tierlists = [tl for tl in tierlist_list if tl.category == category]
     else:
         filtered_tierlists = tierlist_list
 
-    content = DBTierlist.render_list(filtered_tierlists, user_id, categories, category)
+    if mine_only == "true":
+        filtered_tierlists = [tl for tl in filtered_tierlists if tl.owner_id == user_id]
+
+    content = DBTierlist.render_list(
+        filtered_tierlists, user_id, categories, category, mine_only == "true"
+    )
     return get_full_layout(content, htmx, is_admin)
 
 
@@ -623,7 +648,9 @@ def get_user_rating(tierlist_id: int, user_id: str):
     return result[0]["rating"] if result else None
 
 
-def rating_button(emoji: str, count: int, rating_value: int, tierlist_id: int, is_active: bool):
+def rating_button(
+    emoji: str, count: int, rating_value: int, tierlist_id: int, is_active: bool
+):
     return Button(
         f"{emoji} {count}",
         hx_post=f"{ar_tierlist.prefix}/id/{tierlist_id}/rate",
@@ -683,13 +710,16 @@ def rate_tierlist(id: int, rating: int, session):
             existing_rating.rating = rating
             tierlist_ratings.update(existing_rating)
     else:
-        tierlist_ratings.insert({"tierlist_id": id, "user_id": user_id, "rating": rating})
+        tierlist_ratings.insert(
+            {"tierlist_id": id, "user_id": user_id, "rating": rating}
+        )
 
     return rating_display(id, user_id)
 
 
 def render_comment(comment: TierlistComment):
     from .users_router import get_user_avatar
+
     username, avatar_url = get_user_avatar(comment.user_id)
     user_rating = get_user_rating(comment.tierlist_id, comment.user_id)
 
@@ -726,7 +756,9 @@ def get_comments(id: int, session):
         Article(
             H3("Comments"),
             Div(
-                *[render_comment(c) for c in comment_list] if comment_list else [P("No comments yet")],
+                *[render_comment(c) for c in comment_list]
+                if comment_list
+                else [P("No comments yet")],
                 cls="comments-list",
             ),
             Form(
@@ -751,12 +783,14 @@ def get_comments(id: int, session):
 def post_comment(id: int, comment: str, session):
     user_id = session.get("user_id")
 
-    tierlist_comments.insert({
-        "tierlist_id": id,
-        "user_id": user_id,
-        "comment": comment,
-        "created_at": datetime.now().isoformat(),
-    })
+    tierlist_comments.insert(
+        {
+            "tierlist_id": id,
+            "user_id": user_id,
+            "comment": comment,
+            "created_at": datetime.now().isoformat(),
+        }
+    )
 
     return get_comments(id, session), Div(
         rating_display(id, user_id),

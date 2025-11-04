@@ -489,35 +489,54 @@ async def post_image_upload_form(
 
 
 @ar_images.get("/list", name="View Gallery")
-def get_image_gallery(htmx, request, session, category: str = ""):
+def get_image_gallery(htmx, request, session, category: str = "", mine_only: str = ""):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
     accessible_images = get_accessible_images(user_id, is_admin)
 
     categories = sorted(set(img.category for img in accessible_images if img.category))
 
-    if category:
+    if category and category != "All":
         filtered_images = [img for img in accessible_images if img.category == category]
     else:
         filtered_images = accessible_images
 
+    if mine_only == "true":
+        filtered_images = [img for img in filtered_images if img.owner_id == user_id]
+
     grid = get_image_grid(filtered_images, user_id)
     content = (
         H1("Image Gallery"),
-        Label(
-            "Filter by category",
-            Select(
-                Option("All", value="", selected=(not category)),
-                *[
-                    Option(cat, value=cat, selected=(cat == category))
-                    for cat in categories
-                ],
-                name="category",
-                hx_get=f"{ar_images.prefix}/list",
-                hx_target="#main",
-                hx_push_url="true",
-                hx_include="this",
+        Div(
+            Label(
+                "Filter by category",
+                Select(
+                    Option("All", value="", selected=(not category)),
+                    *[
+                        Option(cat, value=cat, selected=(cat == category))
+                        for cat in categories
+                    ],
+                    name="category",
+                    hx_get=f"{ar_images.prefix}/list",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    hx_include="[name='mine_only']",
+                ),
             ),
+            Label(
+                Input(
+                    type="checkbox",
+                    name="mine_only",
+                    value="true",
+                    checked=(mine_only == "true"),
+                    hx_get=f"{ar_images.prefix}/list",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    hx_include="[name='category']",
+                ),
+                "Show only mine",
+            ),
+            style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
         ),
         grid,
     )
