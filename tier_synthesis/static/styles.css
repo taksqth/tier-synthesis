@@ -112,3 +112,65 @@ article a:hover {
         opacity: 1;
     }
 }
+
+/* Rating buttons (similar to Slack/Discord reactions) */
+.rating-button {
+    padding: 0.25rem 0.5rem;
+    margin-right: 0.25rem;
+    font-size: 0.9rem;
+}
+
+.rating-container {
+    display: inline-flex;
+    margin-top: 0.5em;
+}
+
+/* User info display */
+.user-info {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.5em;
+}
+
+.user-info.large {
+    margin-bottom: 1em;
+}
+
+.user-info .avatar {
+    width: 24px;
+    height: 24px;
+}
+
+.user-info.large .avatar {
+    width: 32px;
+    height: 32px;
+}
+
+.user-info small {
+    margin-left: 0.5em;
+}
+
+/* Comments */
+.comments-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+.comment-item {
+    margin-bottom: 1rem;
+}
+
+.comment-item .user-info {
+    margin-bottom: 0.5rem;
+}
+
+.comment-item .user-info > div {
+    display: flex;
+    flex-direction: column;
+    margin-left: 0.5rem;
+}
+
+.text-muted {
+    color: var(--pico-muted-color);
+}

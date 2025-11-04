@@ -70,12 +70,11 @@ users = db.create(
 )
 
 
-def get_user_avatar(owner_id: str):
-    """Get user avatar URL and username for display
+DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
+ANONYMOUS_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Ccircle cx='24' cy='24' r='20' fill='%23999'/%3E%3Ctext x='24' y='30' text-anchor='middle' fill='white' font-size='20'%3E%3F%3C/text%3E%3C/svg%3E"
 
-    Returns:
-        tuple: (username, avatar_url)
-    """
+
+def get_user_avatar(owner_id: str):
     user_data = db.q("SELECT username, avatar FROM user WHERE id = ?", [owner_id])
     if user_data:
         username = user_data[0]["username"]
@@ -83,9 +82,31 @@ def get_user_avatar(owner_id: str):
         if avatar_hash:
             avatar_url = f"https://cdn.discordapp.com/avatars/{owner_id}/{avatar_hash}.png?size=128"
         else:
-            avatar_url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
+            avatar_url = DEFAULT_AVATAR
         return username, avatar_url
-    return "Unknown", "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
+    return "Unknown", DEFAULT_AVATAR
+
+
+def get_anonymous_avatar():
+    return "Anonymous", ANONYMOUS_AVATAR
+
+
+def users_share_group(user_id_1: str, user_id_2: str) -> bool:
+    if user_id_1 == user_id_2:
+        return True
+
+    result = db.q(
+        """
+        SELECT COUNT(*) as shared_count
+        FROM user_group_membership ugm1
+        JOIN user_group_membership ugm2
+        ON ugm1.group_id = ugm2.group_id
+        WHERE ugm1.user_id = ? AND ugm2.user_id = ?
+        """,
+        [user_id_1, user_id_2],
+    )
+
+    return result[0]["shared_count"] > 0 if result else False
 
 
 ar_users = APIRouter(prefix="/admin/users")

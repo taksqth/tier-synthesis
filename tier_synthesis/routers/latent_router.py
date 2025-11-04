@@ -28,6 +28,7 @@ def tierlist_to_ratings(tierlist_data):
 
 def build_ratings_matrix(category, user_id, is_admin):
     from .tierlist_router import get_accessible_tierlists
+    from .users_router import users_share_group
 
     accessible_images = get_accessible_images(user_id, is_admin)
     category_images = [img for img in accessible_images if img.category == category]
@@ -38,8 +39,8 @@ def build_ratings_matrix(category, user_id, is_admin):
     image_ids = [img.id for img in category_images]
     image_id_to_idx = {img_id: idx for idx, img_id in enumerate(image_ids)}
 
-    accessible_tierlists = get_accessible_tierlists(user_id, is_admin)
-    category_tierlists = [tl for tl in accessible_tierlists if tl.category == category]
+    tierlists = get_accessible_tierlists(user_id, is_admin, fetch_all=True)
+    category_tierlists = [tl for tl in tierlists if tl.category == category]
 
     if not category_tierlists:
         return None, None, None
@@ -58,7 +59,13 @@ def build_ratings_matrix(category, user_id, is_admin):
                 has_ratings = True
 
         if has_ratings:
-            tierlist_labels.append((tierlist.owner_id, tierlist.name))
+            tierlist_labels.append(
+                (
+                    tierlist.owner_id,
+                    tierlist.name,
+                    users_share_group(user_id, tierlist.owner_id),
+                )
+            )
             ratings_list.append(rating_vector)
 
     if len(ratings_list) < 2:
@@ -97,9 +104,9 @@ def select_category(htmx, request, session):
             Article(
                 A(
                     cat,
-                    hx_get=f"{ar_latent.prefix}/analyze?category={cat}",
+                    href=f"{ar_latent.prefix}/analyze?category={cat}",
+                    hx_boost="true",
                     hx_target="#main",
-                    hx_push_url="true",
                 )
             )
             for cat in categories
@@ -128,9 +135,10 @@ def analyze_category(category: str, htmx, request, session):
             ),
             A(
                 "Back to category selection",
-                hx_get=f"{ar_latent.prefix}/list",
+                href=f"{ar_latent.prefix}/list",
+                hx_boost="true",
                 hx_target="#main",
-                hx_push_url="true",
+                role="button",
             ),
         )
         return get_full_layout(content, htmx, is_admin)
@@ -146,8 +154,8 @@ def analyze_category(category: str, htmx, request, session):
     user_map = {u["id"]: u["username"] for u in users_db}
 
     display_labels = [
-        f"{user_map.get(owner_id, owner_id)} - {tierlist_name}"
-        for owner_id, tierlist_name in tierlist_labels
+        f"{user_map.get(owner_id, owner_id) if share_group else 'Anonymous'} - {tierlist_name}"
+        for owner_id, tierlist_name, share_group in tierlist_labels
     ]
 
     W_normalized = W / W.sum(axis=1, keepdims=True)
@@ -161,7 +169,7 @@ def analyze_category(category: str, htmx, request, session):
         )
 
     current_user_indices = [
-        i for i, (owner_id, _) in enumerate(tierlist_labels) if owner_id == user_id
+        i for i, (owner_id, _, _) in enumerate(tierlist_labels) if owner_id == user_id
     ]
 
     from sklearn.metrics.pairwise import cosine_similarity
@@ -195,7 +203,7 @@ def analyze_category(category: str, htmx, request, session):
             ],
         )
 
-    from .users_router import get_user_avatar
+    from .users_router import get_user_avatar, get_anonymous_avatar
 
     user_avatars = {}
     for owner_id in set(owner_ids):
@@ -207,7 +215,9 @@ def analyze_category(category: str, htmx, request, session):
             create_taste_profile(
                 W_normalized[i],
                 display_labels[i],
-                user_avatars.get(tierlist_labels[i][0]),
+                user_avatars.get(tierlist_labels[i][0])
+                if tierlist_labels[i][2]
+                else get_anonymous_avatar()[1],
             )
             for i in current_user_indices
         ]
@@ -229,9 +239,9 @@ def analyze_category(category: str, htmx, request, session):
             H1(f"Taste Insights: {category}"),
             A(
                 "Back",
-                hx_get=f"{ar_latent.prefix}/list",
+                href=f"{ar_latent.prefix}/list",
+                hx_boost="true",
                 hx_target="#main",
-                hx_push_url="true",
                 cls="secondary",
                 role="button",
             ),

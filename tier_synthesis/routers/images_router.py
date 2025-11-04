@@ -41,7 +41,6 @@ image_shares = db.create(
     transform=True,
 )
 
-
 # Router setup
 ar_images = APIRouter(prefix="/images")
 ar_images.name = "Images"
@@ -125,6 +124,27 @@ def get_image_thumbnail(image):
     return thumbnail
 
 
+async def get_safe_image_data(image: UploadFile):
+    ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024
+
+    if image.content_type not in ALLOWED_MIME_TYPES:
+        raise ValueError(f"Invalid file type: {image.content_type}")
+
+    image_data = await image.read()
+
+    if len(image_data) > MAX_IMAGE_SIZE:
+        raise ValueError(f"File too large: {image.filename}")
+
+    img = Image.open(BytesIO(image_data))
+    img.verify()
+
+    img = Image.open(BytesIO(image_data))
+    img.load()
+
+    return image_data
+
+
 def get_image_card(image, user_id: str):
     from .base_layout import tag
     from .users_router import get_user_avatar
@@ -155,12 +175,12 @@ def get_image_card(image, user_id: str):
 
 def get_image_cards(images, user_id: str):
     return [
-        Article(
+        A(
             get_image_card(image, user_id),
-            hx_get=f"/images/id/{image.id}",
+            href=f"/images/id/{image.id}",
+            hx_boost="true",
             hx_target="#main",
-            hx_push_url="true",
-            style="cursor: pointer;",
+            style="cursor: pointer; text-decoration: none; color: inherit;",
         )
         for image in images
     ]
@@ -224,7 +244,9 @@ def get_image_edit_form(id: int, htmx, request, session):
                 hx_target="#main",
                 hx_push_url="true",
                 cls="secondary outline",
-            ),
+            )
+            if can_edit
+            else None,
             cls="flex-row",
         ),
         Div(
@@ -254,6 +276,14 @@ def get_image_edit_form(id: int, htmx, request, session):
                         readonly=not can_edit,
                     ),
                 ),
+                Label(
+                    "Change image",
+                    Input(
+                        type="file",
+                        name="new_uploaded_image",
+                        accept="image/*",
+                    ),
+                ),
                 category_input(categories, value=image.category, readonly=not can_edit),
                 (
                     Label(
@@ -275,24 +305,23 @@ def get_image_edit_form(id: int, htmx, request, session):
                     if user_groups
                     else None
                 ),
-                Input(
-                    type="submit",
-                    value="Submit",
-                    hx_post=f"{ar_images.prefix}/id/{id}",
-                    hx_target="#main",
-                    hx_push_url="true",
-                    disabled=not can_edit,
+                Button(
+                    "Submit",
                 )
                 if can_edit
                 else None,
             ),
+            enctype="multipart/form-data",
+            hx_post=f"{ar_images.prefix}/id/{id}",
+            hx_target="#main",
+            hx_push_url="true",
         ),
     )
     return get_full_layout(content, htmx, is_admin)
 
 
 @ar_images.post("/id/{id}")
-def post_image_edit_form(
+async def post_image_edit_form(
     id: int,
     name: str,
     category: str,
@@ -300,6 +329,7 @@ def post_image_edit_form(
     request,
     session,
     shared_groups: list[str] = None,
+    new_uploaded_image: UploadFile = None,
 ):
     image = images[id]
     user_id = session.get("user_id")
@@ -307,14 +337,23 @@ def post_image_edit_form(
 
     if image.owner_id != user_id and not is_admin:
         return get_full_layout(
-            H1("Access Denied"),
-            P("You don't have permission to edit this image."),
+            (
+                H1("Access Denied"),
+                P("You don't have permission to edit this image."),
+            ),
             htmx,
             is_admin,
         )
 
     image.name = name
     image.category = category
+
+    if new_uploaded_image:
+        image_data = await get_safe_image_data(new_uploaded_image)
+        thumbnail_data = process_image(image_data)
+        image.image_data = image_data
+        image.thumbnail_data = thumbnail_data
+
     images.update(image)
 
     db.q("DELETE FROM image_share WHERE image_id = ?", [id])
@@ -414,59 +453,39 @@ def get_image_upload_form(htmx, session, request):
 @ar_images.post("/new")
 async def post_image_upload_form(
     uploaded_images: list[UploadFile],
+    session,
     category: str = "",
     shared_groups: list[str] = None,
-    session = None,
 ):
-    ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-    MAX_IMAGE_SIZE = 10 * 1024 * 1024
     owner_id = session.get("user_id")
 
-    try:
-        valid_images = []
-        for image in uploaded_images:
-            if image.content_type not in ALLOWED_MIME_TYPES:
-                raise ValueError(f"Invalid file type: {image.content_type}")
+    valid_images = []
+    for image in uploaded_images:
+        image_data = await get_safe_image_data(image)
+        thumbnail_data = process_image(image_data)
 
-            image_data = await image.read()
-
-            if len(image_data) > MAX_IMAGE_SIZE:
-                raise ValueError(f"File too large: {image.filename}")
-
-            img = Image.open(BytesIO(image_data))
-            img.verify()
-
-            img = Image.open(BytesIO(image_data))
-            img.load()
-
-            thumbnail_data = process_image(image_data)
-
-            valid_images.append(
-                DBImage(
-                    owner_id=owner_id,
-                    name=f"Image_{uuid.uuid4().hex[:8]}",
-                    image_data=image_data,
-                    thumbnail_data=thumbnail_data,
-                    created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    content_type=image.content_type,
-                    category=category or "unclassified",
-                )
+        valid_images.append(
+            DBImage(
+                owner_id=owner_id,
+                name=f"Image_{uuid.uuid4().hex[:8]}",
+                image_data=image_data,
+                thumbnail_data=thumbnail_data,
+                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                content_type=image.content_type,
+                category=category or "unclassified",
             )
-
-        images_to_insert = [images.insert(image) for image in valid_images]
-
-        if shared_groups:
-            for img in images_to_insert:
-                for group_id in shared_groups:
-                    image_shares.insert({"image_id": img.id, "user_group_id": int(group_id)})
-
-        return get_image_cards(images_to_insert, owner_id)
-
-    except Exception as e:
-        return Div(
-            P(f"Error: {str(e)}", style="color: red; text-align: center;"),
-            cls="alert alert-error",
         )
+
+    images_to_insert = [images.insert(image) for image in valid_images]
+
+    if shared_groups:
+        for img in images_to_insert:
+            for group_id in shared_groups:
+                image_shares.insert(
+                    {"image_id": img.id, "user_group_id": int(group_id)}
+                )
+
+    return get_image_cards(images_to_insert, owner_id)
 
 
 @ar_images.get("/list", name="View Gallery")

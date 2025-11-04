@@ -71,9 +71,8 @@ class UserGroup:
                     A(
                         group.groupname,
                         href=f"{ar_groups.prefix}/id/{group.id}",
-                        hx_get=f"{ar_groups.prefix}/id/{group.id}",
+                        hx_boost="true",
                         hx_target="#main",
-                        hx_push_url="true",
                     ),
                     Button(
                         "Delete",

@@ -62,12 +62,13 @@ class DBTierlist:
         return Div(
             Header(
                 H1("Image Tier List" + (" (Read Only)" if not can_edit else "")),
-                Button(
+                A(
                     "Back to tierlists",
-                    hx_get=f"{ar_tierlist.prefix}/list",
+                    href=f"{ar_tierlist.prefix}/list",
+                    hx_boost="true",
                     hx_target="#main",
-                    hx_push_url="true",
                     cls="secondary",
+                    role="button",
                 ),
                 cls="flex-row",
             ),
@@ -76,10 +77,9 @@ class DBTierlist:
                     src=avatar_url,
                     alt="avatar",
                     cls="avatar",
-                    style="width: 32px; height: 32px; border-radius: 50%; vertical-align: middle;",
                 ),
-                Strong(username, style="margin-left: 0.5em;"),
-                style="display: flex; align-items: center; margin-bottom: 1em;",
+                Strong(username),
+                cls="user-info large",
             ),
             self._create_save_form(can_edit, user_groups or [], shared_group_ids or []),
             P("Category: ", tag(self.category)),
@@ -233,9 +233,9 @@ class DBTierlist:
                 H1("My Tierlists"),
                 A(
                     "Create New",
-                    hx_get=f"{ar_tierlist.prefix}/new",
+                    href=f"{ar_tierlist.prefix}/new",
+                    hx_boost="true",
                     hx_target="#main",
-                    hx_push_url="true",
                     cls="primary",
                     role="button",
                 ),
@@ -253,7 +253,6 @@ class DBTierlist:
                         name="category",
                         hx_get=f"{ar_tierlist.prefix}/list",
                         hx_target="#main",
-                        hx_push_url="true",
                         hx_include="this",
                     ),
                 )
@@ -262,28 +261,27 @@ class DBTierlist:
             ),
             *[
                 list_item(
-                    A(
-                        Div(
-                            Img(
-                                src=get_user_avatar(tierlist.owner_id)[1],
-                                alt="avatar",
-                                cls="avatar",
-                                style="width: 24px; height: 24px; border-radius: 50%; vertical-align: middle;",
+                    Div(
+                        A(
+                            Div(
+                                Img(
+                                    src=get_user_avatar(tierlist.owner_id)[1],
+                                    alt="avatar",
+                                    cls="avatar",
+                                ),
+                                Small(get_user_avatar(tierlist.owner_id)[0]),
+                                cls="user-info",
                             ),
-                            Small(
-                                get_user_avatar(tierlist.owner_id)[0],
-                                style="margin-left: 0.5em;",
-                            ),
-                            style="display: flex; align-items: center; margin-bottom: 0.5em;",
+                            Strong(tierlist.name),
+                            f" - {tierlist.created_at[:10]}",
+                            Br(),
+                            tag(tierlist.category),
+                            tag("Owned" if tierlist.owner_id == user_id else "Shared"),
+                            href=f"{ar_tierlist.prefix}/id/{tierlist.id}",
+                            hx_boost="true",
+                            hx_target="#main",
                         ),
-                        Strong(tierlist.name),
-                        f" - {tierlist.created_at[:10]}",
-                        Br(),
-                        tag(tierlist.category),
-                        tag("Owned" if tierlist.owner_id == user_id else "Shared"),
-                        hx_get=f"{ar_tierlist.prefix}/id/{tierlist.id}",
-                        hx_target="#main",
-                        hx_push_url="true",
+                        rating_display(tierlist.id, user_id),
                     ),
                     Button(
                         "Delete",
@@ -310,6 +308,23 @@ class TierlistShare:
     user_group_id: int
 
 
+@dataclass
+class TierlistRating:
+    id: int
+    tierlist_id: int
+    user_id: str
+    rating: int
+
+
+@dataclass
+class TierlistComment:
+    id: int
+    tierlist_id: int
+    user_id: str
+    comment: str
+    created_at: str
+
+
 db = database(os.environ.get("DB_PATH", "app/database.db"))
 tierlists = db.create(
     DBTierlist,
@@ -323,10 +338,22 @@ tierlist_shares = db.create(
     foreign_keys=(("tierlist_id", "db_tierlist"), ("user_group_id", "user_group")),
     transform=True,
 )
+tierlist_ratings = db.create(
+    TierlistRating,
+    pk="id",
+    foreign_keys=(("tierlist_id", "db_tierlist"), ("user_id", "user")),
+    transform=True,
+)
+tierlist_comments = db.create(
+    TierlistComment,
+    pk="id",
+    foreign_keys=(("tierlist_id", "db_tierlist"), ("user_id", "user")),
+    transform=True,
+)
 
 
-def get_accessible_tierlists(user_id: str, is_admin: bool):
-    if is_admin:
+def get_accessible_tierlists(user_id: str, is_admin: bool, fetch_all: bool = False):
+    if is_admin or fetch_all:
         result = db.q("SELECT * FROM db_tierlist ORDER BY created_at DESC")
     else:
         result = db.q(
@@ -574,6 +601,167 @@ def delete_tierlist(id: str, htmx, request, session):
 
     tierlists.delete(id)
     return list_tierlists(htmx, request, session)
+
+
+def get_rating_counts(tierlist_id: int):
+    love_count = db.q(
+        "SELECT COUNT(*) as count FROM tierlist_rating WHERE tierlist_id = ? AND rating = 1",
+        [tierlist_id],
+    )[0]["count"]
+    tomato_count = db.q(
+        "SELECT COUNT(*) as count FROM tierlist_rating WHERE tierlist_id = ? AND rating = -1",
+        [tierlist_id],
+    )[0]["count"]
+    return love_count, tomato_count
+
+
+def get_user_rating(tierlist_id: int, user_id: str):
+    result = db.q(
+        "SELECT rating FROM tierlist_rating WHERE tierlist_id = ? AND user_id = ?",
+        [tierlist_id, user_id],
+    )
+    return result[0]["rating"] if result else None
+
+
+def rating_button(emoji: str, count: int, rating_value: int, tierlist_id: int, is_active: bool):
+    return Button(
+        f"{emoji} {count}",
+        hx_post=f"{ar_tierlist.prefix}/id/{tierlist_id}/rate",
+        hx_vals=f'{{"rating": {rating_value}}}',
+        hx_target=f"#ratings-{tierlist_id}",
+        hx_swap="outerHTML",
+        cls=f"rating-button {'' if is_active else 'outline secondary'}",
+    )
+
+
+def get_comment_count(tierlist_id: int):
+    return db.q(
+        "SELECT COUNT(*) as count FROM tierlist_comment WHERE tierlist_id = ?",
+        [tierlist_id],
+    )[0]["count"]
+
+
+def rating_display(tierlist_id: int, user_id: str):
+    love_count, tomato_count = get_rating_counts(tierlist_id)
+    user_rating = get_user_rating(tierlist_id, user_id)
+    comment_count = get_comment_count(tierlist_id)
+
+    return Div(
+        rating_button("👎", tomato_count, -1, tierlist_id, user_rating == -1),
+        rating_button("❤️", love_count, 1, tierlist_id, user_rating == 1),
+        Button(
+            f"💬 {comment_count}",
+            hx_get=f"{ar_tierlist.prefix}/id/{tierlist_id}/comments",
+            hx_target=f"#comments-modal-{tierlist_id}",
+            hx_swap="innerHTML",
+            onclick=f"document.getElementById('comments-modal-{tierlist_id}').showModal()",
+            cls="rating-button outline secondary",
+        ),
+        Dialog(id=f"comments-modal-{tierlist_id}", style="width: 600px;"),
+        id=f"ratings-{tierlist_id}",
+        cls="rating-container",
+    )
+
+
+@ar_tierlist.post("/id/{id}/rate")
+def rate_tierlist(id: int, rating: int, session):
+    user_id = session.get("user_id")
+
+    if rating not in [-1, 1]:
+        return rating_display(id, user_id)
+
+    existing = db.q(
+        "SELECT * FROM tierlist_rating WHERE tierlist_id = ? AND user_id = ?",
+        [id, user_id],
+    )
+
+    if existing:
+        existing_rating = TierlistRating(**existing[0])
+        if existing_rating.rating == rating:
+            tierlist_ratings.delete(existing_rating.id)
+        else:
+            existing_rating.rating = rating
+            tierlist_ratings.update(existing_rating)
+    else:
+        tierlist_ratings.insert({"tierlist_id": id, "user_id": user_id, "rating": rating})
+
+    return rating_display(id, user_id)
+
+
+def render_comment(comment: TierlistComment):
+    from .users_router import get_user_avatar
+    username, avatar_url = get_user_avatar(comment.user_id)
+    user_rating = get_user_rating(comment.tierlist_id, comment.user_id)
+
+    vote_indicator = ""
+    if user_rating == 1:
+        vote_indicator = " ❤️"
+    elif user_rating == -1:
+        vote_indicator = " 👎"
+
+    return Article(
+        Div(
+            Img(src=avatar_url, alt="avatar", cls="avatar"),
+            Div(
+                Strong(username + vote_indicator),
+                Small(comment.created_at[:16], cls="text-muted"),
+            ),
+            cls="user-info",
+        ),
+        P(comment.comment),
+        cls="comment-item",
+    )
+
+
+@ar_tierlist.get("/id/{id}/comments")
+def get_comments(id: int, session):
+    user_id = session.get("user_id")
+    comments = db.q(
+        "SELECT * FROM tierlist_comment WHERE tierlist_id = ? ORDER BY created_at DESC",
+        [id],
+    )
+    comment_list = [TierlistComment(**c) for c in comments]
+
+    return Div(
+        Article(
+            H3("Comments"),
+            Div(
+                *[render_comment(c) for c in comment_list] if comment_list else [P("No comments yet")],
+                cls="comments-list",
+            ),
+            Form(
+                Fieldset(
+                    Textarea(
+                        name="comment",
+                        placeholder="Write a comment...",
+                        required=True,
+                        rows="3",
+                    ),
+                    Button("Post Comment", type="submit"),
+                ),
+                hx_post=f"{ar_tierlist.prefix}/id/{id}/comments",
+                hx_target=f"#comments-modal-{id}",
+                hx_swap="innerHTML",
+            ),
+        ),
+    )
+
+
+@ar_tierlist.post("/id/{id}/comments")
+def post_comment(id: int, comment: str, session):
+    user_id = session.get("user_id")
+
+    tierlist_comments.insert({
+        "tierlist_id": id,
+        "user_id": user_id,
+        "comment": comment,
+        "created_at": datetime.now().isoformat(),
+    })
+
+    return get_comments(id, session), Div(
+        rating_display(id, user_id),
+        **{"hx-swap-oob": f"true:#{f'ratings-{id}'}"},
+    )
 
 
 tierlist_router = ar_tierlist

@@ -20,7 +20,7 @@ def get_named_routes(api_router):
 def get_header(is_admin=False):
 
     def create_nav_link(title, page_path):
-        return A(title, hx_get=page_path, hx_target="#main", hx_push_url="true")
+        return A(title, href=page_path, hx_boost="true", hx_target="#main")
 
     def should_show_router(api_router):
         is_admin_router = api_router.prefix.startswith("/admin/")
@@ -92,7 +92,7 @@ def get_full_layout(content, htmx, is_admin=False):
                     if (window._globalHandlersRegistered) return;
                     window._globalHandlersRegistered = true;
 
-                    document.body.addEventListener('htmx:beforeSwap', function() {
+                    htmx.on('htmx:beforeSwap', function() {
                         document.querySelectorAll('details[open]').forEach(details => {
                             details.removeAttribute('open');
                         });
