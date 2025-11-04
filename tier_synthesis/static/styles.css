@@ -174,3 +174,34 @@ article a:hover {
 .text-muted {
     color: var(--pico-muted-color);
 }
+
+/* Utility classes for common layouts */
+.centered-content {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.narrow-form {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.mt-2 {
+    margin-top: 2em;
+}
+
+.error-text {
+    color: red;
+}

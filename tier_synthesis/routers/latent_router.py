@@ -310,8 +310,7 @@ def render_all_profiles_section(
                 )
                 for i in range(len(display_labels))
             ],
-            cls="grid",
-            style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));",
+            cls="card-grid",
         ),
     )
 
@@ -536,8 +535,7 @@ def image_latent_gallery(category: str, theme: int, htmx, request, session):
                 )
                 for img, _ in sorted_images
             ],
-            cls="grid",
-            style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));",
+            cls="card-grid",
         ),
     )
 

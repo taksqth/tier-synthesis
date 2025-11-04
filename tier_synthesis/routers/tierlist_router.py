@@ -195,19 +195,16 @@ class DBTierlist:
                 Label(
                     "Share with groups",
                     *[
-                        Label(
-                            Input(
-                                type="checkbox",
-                                name="shared_groups",
-                                value=str(group["id"]),
-                                checked=group["id"] in shared_group_ids,
-                                disabled=not can_edit,
-                            ),
-                            group["groupname"],
+                        CheckboxX(
+                            name="shared_groups",
+                            value=str(group["id"]),
+                            checked=group["id"] in shared_group_ids,
+                            disabled=not can_edit,
+                            label=group["groupname"],
+                            **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
                         )
                         for group in user_groups
                     ],
-                    **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
                 )
                 if user_groups
                 else None
@@ -259,18 +256,14 @@ class DBTierlist:
                     if categories
                     else None
                 ),
-                Label(
-                    Input(
-                        type="checkbox",
-                        name="mine_only",
-                        value="true",
-                        checked=mine_only,
-                        hx_get=f"{ar_tierlist.prefix}/list",
-                        hx_target="#main",
-                        hx_include="[name='category']",
-                        hx_push_url="true",
-                    ),
-                    "Show only mine",
+                CheckboxX(
+                    name="mine_only",
+                    value="true",
+                    checked=mine_only,
+                    label="Show only mine",
+                    hx_get=f"{ar_tierlist.prefix}/list",
+                    hx_target="#main",
+                    hx_include="[name='category']",
                 ),
                 style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
             ),

@@ -82,7 +82,7 @@ def _not_found(req, exc):
     content = Titled(
         H1("404 - Page Not Found", align="center"),
         P("The page you're looking for doesn't exist.", align="center"),
-        style="margin-top: 2em",
+        cls="mt-2",
     )
     return content
 
@@ -95,7 +95,7 @@ def _server_error(req, exc):
             "We're experiencing some technical difficulties. Please try again later or contact support if the problem persists.",
             align="center",
         ),
-        style="margin-top: 2em",
+        cls="mt-2",
     )
     return content
 
@@ -125,12 +125,29 @@ app, rt = fast_app(
             ),
         ],
     ),
-    htmlkw={"lang": "en"},
+    htmlkw={"lang": "en", "charset": "utf-8"},
     before=bware,
     on_startup=[on_startup],
     exception_handlers={404: _not_found, 500: _server_error},
     debug=os.environ.get("DEBUG", "false").lower() == "true",
+    sess_https_only=not is_local_dev(),
+    same_site="lax",
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["content-type"] = "text/html; charset=utf-8"
+    response.headers.update({
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Cache-Control": "no-cache, no-store, must-revalidate" if not request.url.path.startswith("/static/") else response.headers.get("Cache-Control", "public, max-age=31536000"),
+    })
+    if "Expires" in response.headers:
+        del response.headers["Expires"]
+    return response
 
 for router in get_api_routers():
     router.to_app(app)
@@ -172,19 +189,16 @@ def login(htmx):
                     placeholder="Username",
                     required=True,
                 ),
-                Label(
-                    Input(
-                        type="checkbox",
-                        name="authorized",
-                        value="true",
-                        checked=True,
-                    ),
-                    "Authorized",
+                CheckboxX(
+                    checked=True,
+                    label="Authorized",
+                    name="authorized",
+                    value="true",
                 ),
                 Button("Login", type="submit"),
                 action="/auth_redirect",
                 method="get",
-                style="max-width: 400px; margin: 0 auto;",
+                cls="narrow-form",
             ),
         )
         return get_full_layout(content, htmx)
@@ -262,7 +276,7 @@ def get_home(htmx, request):
             "Discover patterns in character preferences and find like-minded fans.",
         ),
         Div(
-            H2("How it works:", style="margin-top: 2em;"),
+            H2("How it works:", cls="mt-2"),
             Article(
                 Hgroup(
                     H3("1. Upload Images"),
@@ -311,7 +325,7 @@ def get_home(htmx, request):
                     role="button",
                 ),
             ),
-            style="max-width: 800px; margin: 0 auto;",
+            cls="centered-content",
         ),
     )
     return get_full_layout(content, htmx, request.scope.get("is_admin", False))
@@ -346,5 +360,4 @@ def get_terms(htmx):
     return get_full_layout(content, htmx)
 
 
-if __name__ == "__main__":
-    serve()
+serve()

@@ -20,8 +20,7 @@ class User:
             Td(self.username),
             Td(self.id),
             Td(
-                Input(
-                    type="checkbox",
+                CheckboxX(
                     checked=self.authorized,
                     hx_patch=f"/admin/users/{self.id}/toggle-authorized",
                     hx_target="closest tr",
@@ -29,8 +28,7 @@ class User:
                 )
             ),
             Td(
-                Input(
-                    type="checkbox",
+                CheckboxX(
                     checked=self.is_admin,
                     hx_patch=f"/admin/users/{self.id}/toggle-admin",
                     hx_target="closest tr",

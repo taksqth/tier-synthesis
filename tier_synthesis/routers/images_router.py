@@ -218,8 +218,7 @@ def get_image_cards(images, user_id: str):
 def get_image_grid(images, user_id: str):
     return Div(
         *get_image_cards(images, user_id),
-        cls="grid",
-        style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));",
+        cls="image-grid",
     )
 
 
@@ -338,15 +337,12 @@ def get_image_edit_form(id: int, htmx, request, session):
                     Label(
                         "Share with groups",
                         *[
-                            Label(
-                                Input(
-                                    type="checkbox",
-                                    name="shared_groups",
-                                    value=str(group["id"]),
-                                    checked=group["id"] in shared_group_ids,
-                                    disabled=not can_edit,
-                                ),
-                                group["groupname"],
+                            CheckboxX(
+                                name="shared_groups",
+                                value=str(group["id"]),
+                                checked=group["id"] in shared_group_ids,
+                                disabled=not can_edit,
+                                label=group["groupname"],
                             )
                             for group in user_groups
                         ],
@@ -399,7 +395,7 @@ async def post_image_edit_form(
     try:
         validated_category = validate_and_get_category(category)
     except ValueError as e:
-        return get_full_layout(P(f"Category error: {e}", style="color: red;"), htmx, is_admin)
+        return get_full_layout(P(f"Category error: {e}", cls="error-text"), htmx, is_admin)
 
     image.name = name
     image.category = validated_category
@@ -471,13 +467,10 @@ def get_image_upload_form(htmx, session, request):
                 Label(
                     "Share with groups",
                     *[
-                        Label(
-                            Input(
-                                type="checkbox",
-                                name="shared_groups",
-                                value=str(group["id"]),
-                            ),
-                            group["groupname"],
+                        CheckboxX(
+                            name="shared_groups",
+                            value=str(group["id"]),
+                            label=group["groupname"],
                         )
                         for group in user_groups
                     ],
@@ -499,8 +492,7 @@ def get_image_upload_form(htmx, session, request):
         H2("👇 Uploaded images 👇", align="center"),
         Div(
             id="image-list",
-            cls="grid",
-            style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));",
+            cls="image-grid",
         ),
     )
     return get_full_layout(content, htmx, is_admin)
@@ -587,18 +579,14 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
                     hx_include="[name='mine_only']",
                 ),
             ),
-            Label(
-                Input(
-                    type="checkbox",
-                    name="mine_only",
-                    value="true",
-                    checked=(mine_only == "true"),
-                    hx_get=f"{ar_images.prefix}/list",
-                    hx_target="#main",
-                    hx_push_url="true",
-                    hx_include="[name='category']",
-                ),
-                "Show only mine",
+            CheckboxX(
+                name="mine_only",
+                value="true",
+                checked=(mine_only == "true"),
+                label="Show only mine",
+                hx_get=f"{ar_images.prefix}/list",
+                hx_target="#main",
+                hx_include="[name='category']",
             ),
             style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
         ),
