@@ -140,10 +140,15 @@ async def security_headers(request, call_next):
     response = await call_next(request)
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers["content-type"] = "text/html; charset=utf-8"
+    if request.url.path.startswith("/static/"):
+        cache_control = response.headers.get("Cache-Control", "public, max-age=31536000, immutable")
+    else:
+        cache_control = "no-cache"
+
     response.headers.update({
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "SAMEORIGIN",
-        "Cache-Control": "no-cache, no-store, must-revalidate" if not request.url.path.startswith("/static/") else response.headers.get("Cache-Control", "public, max-age=31536000"),
+        "Cache-Control": cache_control,
     })
     if "Expires" in response.headers:
         del response.headers["Expires"]
@@ -173,7 +178,7 @@ def get_discord_client():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse("favicon.ico")
+    return FileResponse("favicon.ico", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/login")
