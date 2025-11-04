@@ -246,6 +246,7 @@ def serve_thumbnail(id: int, session, request):
 @ar_images.get("/id/{id}")
 def get_image_edit_form(id: int, htmx, request, session):
     from .users_router import get_user_avatar
+    from .category_utils import get_all_categories
 
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
@@ -279,7 +280,7 @@ def get_image_edit_form(id: int, htmx, request, session):
         )
     ]
 
-    categories = sorted(set(img.category for img in accessible_images if img.category))
+    categories = get_all_categories()
     username, avatar_url = get_user_avatar(image.owner_id)
 
     content = (
@@ -290,7 +291,6 @@ def get_image_edit_form(id: int, htmx, request, session):
                 hx_delete=f"{ar_images.prefix}/id/{id}",
                 hx_confirm="Delete this image?",
                 hx_target="#main",
-                hx_push_url="true",
                 cls="secondary outline",
             )
             if can_edit
@@ -359,7 +359,6 @@ def get_image_edit_form(id: int, htmx, request, session):
             enctype="multipart/form-data",
             hx_post=f"{ar_images.prefix}/id/{id}",
             hx_target="#main",
-            hx_push_url="true",
         ),
     )
     return get_full_layout(content, htmx, is_admin)
@@ -575,7 +574,6 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
                     name="category",
                     hx_get=f"{ar_images.prefix}/list",
                     hx_target="#main",
-                    hx_push_url="true",
                     hx_include="[name='mine_only']",
                 ),
             ),
