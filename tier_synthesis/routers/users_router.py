@@ -1,4 +1,4 @@
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout
 from dataclasses import dataclass
 from functools import lru_cache
@@ -16,7 +16,7 @@ class User:
     avatar: str
     is_admin: bool
 
-    def render_row(self) -> Tr:
+    def render_row(self) -> Any:
         return Tr(
             Td(self.username),
             Td(self.id),
@@ -39,7 +39,7 @@ class User:
         )
 
     @staticmethod
-    def render_table(users_list: list["User"]):
+    def render_table(users_list: list["User"]) -> Any:
         logger.debug(f"Rendering user table with {len(users_list)} users")
 
         return (
@@ -123,11 +123,11 @@ def get_shared_group_users(user_id):
 
 
 ar_users = APIRouter(prefix="/admin/users")
-ar_users.name = "Users"
+ar_users.name = "Users"  # type: ignore
 
 
 @ar_users.get("/list", name="Manage Users")
-def list_users(htmx, request):
+def list_users(htmx, request) -> Any:
     logger.info("Rendering user management page")
     users_list = users(order_by="-username")
     content = User.render_table(users_list)
@@ -135,7 +135,10 @@ def list_users(htmx, request):
 
 
 @ar_users.patch("/{user_id}/toggle-authorized")
-def toggle_authorized(user_id: str):
+def toggle_authorized(user_id: str, request) -> Any:
+    if not request.scope.get("is_admin", False):
+        return Response("Forbidden", status_code=403)
+
     logger.info(f"Toggling authorization for user {user_id}")
     user = users[user_id]
     user.authorized = not user.authorized
@@ -144,7 +147,10 @@ def toggle_authorized(user_id: str):
 
 
 @ar_users.patch("/{user_id}/toggle-admin")
-def toggle_admin(user_id: str):
+def toggle_admin(user_id: str, request) -> Any:
+    if not request.scope.get("is_admin", False):
+        return Response("Forbidden", status_code=403)
+
     logger.info(f"Toggling admin status for user {user_id}")
     user = users[user_id]
     user.is_admin = not user.is_admin

@@ -1,4 +1,4 @@
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout, list_item
 from dataclasses import dataclass
 import os
@@ -19,7 +19,7 @@ db = database(os.environ.get("DB_PATH", "app/database.db"))
 # ============================================================================
 
 ar_groups = APIRouter(prefix="/admin/groups")
-ar_groups.name = "Groups"
+ar_groups.name = "Groups"  # type: ignore
 
 
 # ============================================================================
@@ -44,7 +44,7 @@ class UserGroup:
                 Button(
                     "Create Group",
                     cls="primary",
-                    **{"@click": "$refs.createGroupModal.showModal()"},
+                    **{"@click": "$refs.createGroupModal.showModal()"},  # type: ignore
                 ),
                 cls="flex-row",
             ),
@@ -54,7 +54,7 @@ class UserGroup:
                         Button(
                             aria_label="Close",
                             rel="prev",
-                            **{"@click": "$refs.createGroupModal.close()"},
+                            **{"@click": "$refs.createGroupModal.close()"},  # type: ignore
                         ),
                         P(Strong("Create New Group")),
                     ),
@@ -79,7 +79,7 @@ class UserGroup:
                         **{"@submit": "$refs.createGroupModal.close()"},
                     ),
                 ),
-                **{"x-ref": "createGroupModal"},
+                **{"x-ref": "createGroupModal"},  # type: ignore
             ),
             *[
                 list_item(
@@ -100,7 +100,7 @@ class UserGroup:
                 )
                 for group in group_list
             ],
-            **{"x-data": "{}"},
+            **{"x-data": "{}"},  # type: ignore
         )
 
     @staticmethod
@@ -113,7 +113,7 @@ class UserGroup:
                 Button(
                     "Add Member",
                     cls="primary",
-                    **{"@click": "$refs.addMemberModal.showModal()"},
+                    **{"@click": "$refs.addMemberModal.showModal()"},  # type: ignore
                     hx_get=f"{ar_groups.prefix}/id/{group.id}/member-options",
                     hx_trigger="click",
                     hx_target="#member-select-container",
@@ -126,7 +126,7 @@ class UserGroup:
                         Button(
                             aria_label="Close",
                             rel="prev",
-                            **{"@click": "$refs.addMemberModal.close()"},
+                            **{"@click": "$refs.addMemberModal.close()"},  # type: ignore
                         ),
                         P(Strong("Add Member to Group")),
                     ),
@@ -144,14 +144,14 @@ class UserGroup:
                         **{"@submit": "$refs.addMemberModal.close()"},
                     ),
                 ),
-                **{"x-ref": "addMemberModal"},
+                **{"x-ref": "addMemberModal"},  # type: ignore
             ),
             Hr(),
             Section(
                 UserGroupMembership.render_user_table_for_group(group.id),
                 id="members-list",
             ),
-            **{"x-data": "{}"},
+            **{"x-data": "{}"},  # type: ignore
         )
 
 
@@ -184,7 +184,7 @@ def view_group(group_id: str, htmx, request):
 
 @ar_groups.post("/new")
 def create_group(groupname: str, htmx, request):
-    user_groups.insert(UserGroup(groupname=groupname))
+    user_groups.insert(groupname=groupname)
     logger.info(f"Create group {groupname}")
     return list_groups(htmx, request)
 
@@ -208,7 +208,7 @@ class UserGroupMembership:
     group_id: int
 
     @staticmethod
-    def render_user_table_for_group(group_id: str):
+    def render_user_table_for_group(group_id: int):
         """Render the user membership list for a specific group"""
         logger.debug(f"Rendering user membership list for group {group_id}")
         users = db.q(

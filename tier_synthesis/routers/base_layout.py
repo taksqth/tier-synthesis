@@ -1,6 +1,5 @@
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from . import get_api_routers
-import os
 
 
 def list_item(content, action_button):

@@ -3,5 +3,3 @@ __pycache__/
 nbs/
 
 .sesskey
-*.db-*
-*.db

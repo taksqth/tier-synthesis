@@ -1,12 +1,15 @@
+from fasthtml.common import *  # type: ignore
 import uuid
-import base64
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from PIL import Image
-from fasthtml.common import *
 from dataclasses import dataclass
 from .base_layout import get_full_layout, tag
+from services.storage import get_storage_service
+import logging
 
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # MODELS
@@ -23,6 +26,8 @@ class DBImage:
     thumbnail_data: bytes
     content_type: str
     created_at: str
+    thumbnail_path: str = ""
+    full_image_path: str = ""
 
 
 @dataclass
@@ -56,8 +61,8 @@ image_shares = db.create(
 # ============================================================================
 
 ar_images = APIRouter(prefix="/images")
-ar_images.name = "Images"
-ar_images.show = True
+ar_images.name = "Images"  # type: ignore
+ar_images.show = True  # type: ignore
 
 
 # ============================================================================
@@ -103,18 +108,13 @@ def can_access_image(image_id: int, user_id: str, is_admin: bool):
     return len(result) > 0
 
 
-def get_accessible_images(user_id: str, is_admin: bool, with_blobs: bool = True):
-    cols = (
-        "*" if with_blobs else "id, owner_id, name, category, content_type, created_at"
-    )
-
+def get_accessible_images(user_id: str, is_admin: bool):
     if is_admin:
-        result = db.q(f"SELECT {cols} FROM db_image ORDER BY created_at DESC")
+        result = db.q("SELECT * FROM db_image ORDER BY created_at DESC")
     else:
-        qualified = f"i.{cols.replace(', ', ', i.')}" if not with_blobs else "i.*"
         result = db.q(
-            f"""
-            SELECT DISTINCT {qualified}
+            """
+            SELECT DISTINCT i.*
             FROM db_image i
             LEFT JOIN image_share s ON i.id = s.image_id
             LEFT JOIN user_group_membership m ON s.user_group_id = m.group_id
@@ -124,26 +124,11 @@ def get_accessible_images(user_id: str, is_admin: bool, with_blobs: bool = True)
             [user_id, user_id],
         )
 
-    if with_blobs:
-        return [DBImage(**row) for row in result]
-
-    return [
-        DBImage(
-            id=row["id"],
-            owner_id=row["owner_id"],
-            name=row["name"],
-            category=row["category"],
-            image_data=b"",
-            thumbnail_data=b"",
-            content_type=row["content_type"],
-            created_at=row["created_at"],
-        )
-        for row in result
-    ]
+    return [DBImage(**row) for row in result]
 
 
-def get_category_images(category, user_id, is_admin):
-    accessible_images = get_accessible_images(user_id, is_admin, with_blobs=False)
+def get_category_images(category: str, user_id: str, is_admin: bool) -> list[DBImage]:
+    accessible_images = get_accessible_images(user_id, is_admin)
     return [img for img in accessible_images if img.category == category]
 
 
@@ -184,21 +169,26 @@ def get_image_card(image, user_id: str):
     from .users_router import get_user_avatar
 
     username, avatar_url = get_user_avatar(image.owner_id)
+    storage = get_storage_service()
+    thumbnail_url = storage.generate_signed_url(image.thumbnail_path)
 
     is_owner = image.owner_id == user_id
     return Card(
-        Div(
+        Header(
             Img(src=avatar_url, alt="avatar", cls="avatar small"),
             Small(username),
+            tag("Owned" if is_owner else "Shared"),
             cls="user-info",
         ),
-        Img(
-            src=f"/images/thumbnail/{image.id}",
-            alt=image.name,
-            loading="lazy",
+        Div(
+            Img(
+                src=thumbnail_url,
+                alt=image.name,
+                loading="lazy",
+            ),
+            P(image.name),
+            align="center",
         ),
-        P(image.name),
-        tag("Owned" if is_owner else "Shared"),
     )
 
 
@@ -215,13 +205,13 @@ def get_image_cards(images, user_id: str):
 
 
 def get_image_grid(images, user_id: str):
-    return Div(
+    return Grid(
         *get_image_cards(images, user_id),
-        cls="image-grid",
+        cls="flex-wrap",
     )
 
 
-def render_image_edit_page(
+def ImageEditPage(
     image: Any,
     can_edit: bool,
     user_groups: list[dict],
@@ -229,25 +219,10 @@ def render_image_edit_page(
     categories: list[str],
     viewer_id: str,
 ) -> Any:
-    from .users_router import get_user_avatar, users_share_group
+    from components.user_display import UserDisplay
 
-    username, avatar_url = get_user_avatar(image.owner_id)
-    can_view_profile = users_share_group(viewer_id, image.owner_id)
-
-    user_display = (
-        A(
-            Img(src=avatar_url, alt="avatar", cls="avatar"),
-            Strong(username),
-            href=f"/profiles/id/{image.owner_id}",
-            hx_boost="true",
-            hx_target="#main",
-        )
-        if can_view_profile
-        else Div(
-            Img(src=avatar_url, alt="avatar", cls="avatar"),
-            Strong(username),
-        )
-    )
+    storage = get_storage_service()
+    full_image_url = storage.generate_signed_url(image.full_image_path)
 
     return (
         Header(
@@ -264,11 +239,11 @@ def render_image_edit_page(
             cls="flex-row",
         ),
         Div(
-            user_display,
+            UserDisplay(image.owner_id, viewer_id),
             cls="user-info header",
         ),
         Img(
-            src=f"data:{image.content_type};base64,{base64.b64encode(image.image_data).decode()}",
+            src=full_image_url,
             alt=image.name,
             style="max-width: 200px; display: block; margin: 0 auto;",
         ),
@@ -315,13 +290,14 @@ def render_image_edit_page(
             enctype="multipart/form-data",
             hx_post=f"{ar_images.prefix}/id/{image.id}",
             hx_target="#main",
+            hx_vals="""js:{
+                shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
+            }""",
         ),
     )
 
 
-def render_image_upload_page(
-    categories: list[str], user_groups: list[dict]
-) -> Any:
+def ImageUploadPage(categories: list[str], user_groups: list[dict]) -> Any:
     return (
         H1("Upload Image"),
         Form(
@@ -337,7 +313,9 @@ def render_image_upload_page(
                 align="center",
             ),
             Fieldset(
-                category_input(categories, input_id="upload-category-input", required=True),
+                category_input(
+                    categories, input_id="upload-category-input", required=True
+                ),
                 (
                     Label(
                         "Share with groups",
@@ -357,16 +335,19 @@ def render_image_upload_page(
             ),
             enctype="multipart/form-data",
             hx_post=f"{ar_images.prefix}/new",
+            hx_vals="""js:{
+                shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
+            }""",
             hx_target="#image-list",
             hx_swap="afterbegin",
             hx_on__after_request="this.reset()",
         ),
         H2("👇 Uploaded images 👇", align="center"),
-        Div(id="image-list", cls="image-grid"),
+        Grid(id="image-list", cls="flex-wrap"),
     )
 
 
-def render_image_gallery_page(
+def ImageGalleryPage(
     filtered_images: list[Any],
     user_id: str,
     categories: list[str],
@@ -426,18 +407,7 @@ def process_image(img_data):
     return buffer.getvalue()
 
 
-def get_image_thumbnail(image):
-    """Get thumbnail for an image, generating and caching if needed"""
-    if image.thumbnail_data:
-        return image.thumbnail_data
-
-    thumbnail = process_image(image.image_data)
-    image.thumbnail_data = thumbnail
-    images.update(image)
-    return thumbnail
-
-
-async def get_safe_image_data(image: UploadFile):
+async def get_safe_image_data(image: UploadFile) -> tuple[bytes, str]:
     ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
     MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
@@ -455,7 +425,28 @@ async def get_safe_image_data(image: UploadFile):
     img = Image.open(BytesIO(image_data))
     img.load()
 
-    return image_data
+    return image_data, image.content_type
+
+
+async def save_uploaded_image(image: DBImage, uploaded_file: UploadFile) -> None:
+    storage = get_storage_service()
+
+    if image.thumbnail_path:
+        storage.delete_image(image.thumbnail_path)
+    if image.full_image_path:
+        storage.delete_image(image.full_image_path)
+
+    image_data, content_type = await get_safe_image_data(uploaded_file)
+    thumbnail_data = process_image(image_data)
+
+    image.thumbnail_path = storage.save_image(
+        thumbnail_data, image.id, content_type, is_thumbnail=True
+    )
+    image.full_image_path = storage.save_image(
+        image_data, image.id, content_type, is_thumbnail=False
+    )
+    image.image_data = b""
+    image.thumbnail_data = b""
 
 
 # ============================================================================
@@ -463,24 +454,35 @@ async def get_safe_image_data(image: UploadFile):
 # ============================================================================
 
 
-@ar_images.get("/thumbnail/{id}")
-def serve_thumbnail(id: int, session, request):
-    user_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+@ar_images.get("/img")
+def serve_image(path: str, expires: int, sig: str):
+    storage = get_storage_service()
 
-    if not can_access_image(id, user_id, is_admin):
+    if not storage.validate_signature(path, expires, sig):
         return Response("Forbidden", status_code=403)
 
-    image = images[id]
-    thumbnail = get_image_thumbnail(image)
+    safe_path = Path(path).as_posix()
+    if ".." in safe_path or safe_path.startswith("/"):
+        logger.warning(f"Path traversal attempt detected: {path}")
+        return Response("Invalid path", status_code=400)
 
-    return Response(
-        content=thumbnail,
-        media_type=image.content_type,
-        headers={
-            "Cache-Control": "private, max-age=3600",
-            "ETag": f'"{id}-{hash(image.created_at)}"',
-        },
+    full_path = os.path.join(storage.storage_path, safe_path)
+
+    try:
+        real_full_path = os.path.realpath(full_path)
+        real_storage_path = os.path.realpath(storage.storage_path)
+        if not real_full_path.startswith(real_storage_path + os.sep):
+            logger.warning(f"Path traversal attempt blocked: {path}")
+            return Response("Forbidden", status_code=403)
+    except (OSError, ValueError) as e:
+        logger.error(f"Path validation error: {e}")
+        return Response("Invalid path", status_code=400)
+
+    if not os.path.exists(full_path):
+        return Response("Not found", status_code=404)
+
+    return FileResponse(
+        full_path, headers={"Cache-Control": "public, max-age=31536000, immutable"}
     )
 
 
@@ -513,7 +515,7 @@ def get_image_edit_form(id: int, htmx, request, session):
     shared_group_ids = get_shared_group_ids(id)
     categories = get_all_categories()
 
-    content = render_image_edit_page(
+    content = ImageEditPage(
         image, can_edit, user_groups, shared_group_ids, categories, user_id
     )
     return get_full_layout(content, htmx, is_admin)
@@ -527,9 +529,9 @@ async def post_image_edit_form(
     htmx,
     request,
     session,
-    shared_groups: list[str] = None,
-    new_uploaded_image: UploadFile = None,
-):
+    shared_groups: str | None = None,
+    new_uploaded_image: UploadFile | None = None,
+) -> Any:
     from .category_utils import validate_and_get_category
 
     image = images[id]
@@ -557,16 +559,13 @@ async def post_image_edit_form(
     image.category = validated_category
 
     if new_uploaded_image:
-        image_data = await get_safe_image_data(new_uploaded_image)
-        thumbnail_data = process_image(image_data)
-        image.image_data = image_data
-        image.thumbnail_data = thumbnail_data
+        await save_uploaded_image(image, new_uploaded_image)
 
     images.update(image)
 
     db.q("DELETE FROM image_share WHERE image_id = ?", [id])
     if shared_groups:
-        for group_id in shared_groups:
+        for group_id in shared_groups.split(","):
             if group_id:
                 image_shares.insert(image_id=id, user_group_id=int(group_id))
 
@@ -579,10 +578,13 @@ def delete_image(id: int, htmx, request, session):
     image = images[id]
 
     if image.owner_id != owner_id:
-        logger.warning(
-            f"User {owner_id} attempted to delete image {id} owned by {image.owner_id}"
-        )
         return RedirectResponse("/unauthorized", status_code=303)
+
+    storage = get_storage_service()
+    if image.thumbnail_path:
+        storage.delete_image(image.thumbnail_path)
+    if image.full_image_path:
+        storage.delete_image(image.full_image_path)
 
     images.delete(id)
     return get_image_gallery(htmx, request, session)
@@ -603,7 +605,7 @@ def get_image_upload_form(htmx, session, request):
     categories = get_all_categories()
     user_groups = get_user_groups_for_user(user_id)
 
-    content = render_image_upload_page(categories, user_groups)
+    content = ImageUploadPage(categories, user_groups)
     return get_full_layout(content, htmx, is_admin)
 
 
@@ -612,7 +614,7 @@ async def post_image_upload_form(
     uploaded_images: list[UploadFile],
     session,
     category: str = "",
-    shared_groups: list[str] = None,
+    shared_groups: str | None = None,
 ):
     from .category_utils import validate_and_get_category
 
@@ -624,26 +626,29 @@ async def post_image_upload_form(
         return P(f"Category error: {e}", style="color: red;")
 
     images_to_insert = []
-    for image in uploaded_images:
-        image_data = await get_safe_image_data(image)
-        thumbnail_data = process_image(image_data)
 
+    for image in uploaded_images:
         img = images.insert(
             owner_id=owner_id,
             name=f"Image_{uuid.uuid4().hex[:8]}",
-            image_data=image_data,
-            thumbnail_data=thumbnail_data,
+            image_data=b"",
+            thumbnail_data=b"",
             created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            content_type=image.content_type,
+            content_type="",
             category=validated_category,
+            thumbnail_path="",
+            full_image_path="",
         )
+
+        await save_uploaded_image(img, image)
+        images.update(img)
+
         images_to_insert.append(img)
 
     if shared_groups:
-        for img in images_to_insert:
-            for group_id in shared_groups:
-                if group_id:
-                    image_shares.insert(image_id=img.id, user_group_id=int(group_id))
+        for group_id in shared_groups.split(","):
+            if group_id:
+                image_shares.insert(image_id=id, user_group_id=int(group_id))
 
     return get_image_cards(images_to_insert, owner_id)
 
@@ -660,7 +665,7 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
 
-    accessible_images = get_accessible_images(user_id, is_admin, with_blobs=False)
+    accessible_images = get_accessible_images(user_id, is_admin)
     categories = get_all_categories()
 
     if category and category != "All":
@@ -671,14 +676,14 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
     if mine_only == "true":
         filtered_images = [img for img in filtered_images if img.owner_id == user_id]
 
-    content = render_image_gallery_page(
+    content = ImageGalleryPage(
         filtered_images, user_id, categories, category, mine_only == "true"
     )
     return get_full_layout(content, htmx, is_admin)
 
 
 @ar_images.get("/categories")
-def get_categories(request, session):
+def get_categories():
     from .category_utils import get_all_categories
 
     return get_all_categories()

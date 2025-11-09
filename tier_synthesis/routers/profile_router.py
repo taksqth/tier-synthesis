@@ -1,12 +1,14 @@
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout, tag
 from .users_router import get_user_avatar, users_share_group
-from .tierlist_router import get_accessible_tierlists, enrich_tierlists_with_ratings
-from .images_router import get_accessible_images
-from .latent_router import (
-    tierlist_to_ratings,
+from .tierlist_router import (
     TIER_TO_RATING,
+    tierlist_to_ratings,
+    get_accessible_tierlists,
+    enrich_tierlists_with_ratings,
 )
+from .images_router import get_accessible_images
+from components.hot_takes import DivergentImage, _calculate_divergence
 import os
 import json
 import logging
@@ -27,8 +29,8 @@ db = database(os.environ.get("DB_PATH", "app/database.db"))
 # ============================================================================
 
 ar_profile = APIRouter(prefix="/profiles")
-ar_profile.name = "Profiles"
-ar_profile.show = True
+ar_profile.name = "Profiles"  # type: ignore
+ar_profile.show = True  # type: ignore
 
 
 # ============================================================================
@@ -47,7 +49,7 @@ def get_user_stats(user_id: str) -> dict:
     unique_images = set()
     for tl in tierlists:
         data = json.loads(tl["data"]) if isinstance(tl["data"], str) else tl["data"]
-        for tier, img_list in data.items():
+        for _, img_list in data.items():
             unique_images.update(img_list)
     rated_images = len(unique_images)
 
@@ -90,53 +92,6 @@ def get_user_stats(user_id: str) -> dict:
 # ============================================================================
 
 
-def calculate_opinion_divergence(user_id: str, category: str) -> list[dict]:
-    """Find images where user's rating differs most from average."""
-    tierlists = db.q(
-        "SELECT id, owner_id, data FROM db_tierlist WHERE category = ?", [category]
-    )
-
-    if len(tierlists) < 2:
-        return []
-
-    image_ratings = {}
-    user_ratings = {}
-
-    for tl in tierlists:
-        ratings = tierlist_to_ratings(tl["data"])
-        owner_id = tl["owner_id"]
-
-        for img_id, rating in ratings.items():
-            if img_id not in image_ratings:
-                image_ratings[img_id] = []
-            image_ratings[img_id].append(rating)
-
-            if owner_id == user_id:
-                user_ratings[img_id] = rating
-
-    divergences = []
-    for img_id, user_rating in user_ratings.items():
-        if img_id in image_ratings and len(image_ratings[img_id]) > 1:
-            others_ratings = [r for r in image_ratings[img_id]]
-            avg_rating = sum(others_ratings) / len(others_ratings)
-
-            divergence = abs(user_rating - avg_rating)
-            is_higher = user_rating > avg_rating
-
-            if divergence > 1.0:  # Only significant divergences
-                divergences.append(
-                    {
-                        "image_id": img_id,
-                        "user_rating": user_rating,
-                        "avg_rating": avg_rating,
-                        "divergence": divergence,
-                        "is_higher": is_higher,
-                    }
-                )
-
-    return sorted(divergences, key=lambda x: x["divergence"], reverse=True)[:10]
-
-
 def find_contrarian_opinions(user_id: str) -> list[dict]:
     """Find opinions where user differs most from the crowd across all categories."""
     categories = db.q(
@@ -146,7 +101,7 @@ def find_contrarian_opinions(user_id: str) -> list[dict]:
     all_divergences = []
     for cat_row in categories:
         category = cat_row["category"]
-        divergences = calculate_opinion_divergence(user_id, category)
+        divergences = _calculate_divergence(user_id, category)
         for div in divergences[:3]:  # Top 3 per category
             div["category"] = category
             all_divergences.append(div)
@@ -182,7 +137,7 @@ def get_taste_profile_summary(user_id: str) -> dict:
 # ============================================================================
 
 
-def render_stat_card(title: str, value: str, subtitle: str = "") -> Any:
+def StatCard(title: str, value: str, subtitle: str = "") -> Any:
     """Render a single stat card."""
     return Article(
         H3(value),
@@ -192,52 +147,7 @@ def render_stat_card(title: str, value: str, subtitle: str = "") -> Any:
     )
 
 
-def render_badge(badge: dict) -> Any:
-    """Render a user badge."""
-    return Article(
-        H4(badge["title"]),
-        P(badge["description"]),
-    )
-
-
-def render_divergent_image(div: dict, images_map: dict) -> Any:
-    """Render an image with divergence info."""
-    image = images_map.get(div["image_id"])
-    if not image:
-        return None
-
-    user_tier = [k for k, v in TIER_TO_RATING.items() if v == div["user_rating"]][0]
-    avg_tier_val = round(div["avg_rating"])
-    avg_tier = [k for k, v in TIER_TO_RATING.items() if v == avg_tier_val][0]
-
-    arrow = "⬆️" if div["is_higher"] else "⬇️"
-    label = "Higher than average" if div["is_higher"] else "Lower than average"
-
-    return Article(
-        A(
-            Img(
-                src=f"/images/thumbnail/{image.id}",
-                alt=image.name,
-                style="width: 100%; cursor: pointer;",
-            ),
-            href=f"/images/id/{image.id}",
-            hx_boost="true",
-            hx_target="#main",
-        ),
-        P(Strong(image.name)),
-        tag(div["category"]),
-        Div(
-            P(
-                f"{arrow} You: ",
-                Strong(user_tier),
-                f" | Everyone: {avg_tier}",
-            ),
-            Small(label),
-        ),
-    )
-
-
-def render_recent_tierlists(tierlists: list, user_id: str) -> Any:
+def RecentTierlists(tierlists: list) -> Any:
     """Render recent tierlists section."""
     if not tierlists:
         return P("No tierlists yet.")
@@ -263,7 +173,7 @@ def render_recent_tierlists(tierlists: list, user_id: str) -> Any:
     )
 
 
-def render_category_insights(category_profiles: list, user_id: str) -> Any:
+def CategoryInsights(category_profiles: list) -> Any:
     """Render taste insights by category."""
     if not category_profiles:
         return P("Create tierlists to see your taste profile!")
@@ -307,7 +217,7 @@ def get_my_profile(htmx, request, session) -> Any:
             is_admin,
         )
 
-    return render_profile_page(user_id, user_id, is_admin, htmx, is_own_profile=True)
+    return ProfilePage(user_id, user_id, is_admin, htmx, is_own_profile=True)
 
 
 @ar_profile.get("/user/{profile_user_id}")
@@ -327,12 +237,10 @@ def get_user_profile(profile_user_id: str, htmx, request, session) -> Any:
                 is_admin,
             )
 
-    return render_profile_page(
-        profile_user_id, viewer_id, is_admin, htmx, is_own_profile=False
-    )
+    return ProfilePage(profile_user_id, viewer_id, is_admin, htmx, is_own_profile=False)
 
 
-def render_profile_page(
+def ProfilePage(
     profile_user_id: str,
     viewer_id: str,
     is_admin: bool,
@@ -350,7 +258,7 @@ def render_profile_page(
 
     contrarian = find_contrarian_opinions(profile_user_id)
 
-    all_images = get_accessible_images(viewer_id, is_admin, with_blobs=False)
+    all_images = get_accessible_images(viewer_id, is_admin)
     images_map = {img.id: img for img in all_images}
 
     taste_summary = get_taste_profile_summary(profile_user_id)
@@ -387,9 +295,9 @@ def render_profile_page(
         # Stats
         H3("Statistics"),
         Grid(
-            render_stat_card("Tierlists Created", str(stats["tierlist_count"])),
-            render_stat_card("Images Ranked", str(stats["rated_images"])),
-            render_stat_card(
+            StatCard("Tierlists Created", str(stats["tierlist_count"])),
+            StatCard("Images Ranked", str(stats["rated_images"])),
+            StatCard(
                 "Community Engagement",
                 str(stats["ratings_received"]),
             ),
@@ -433,9 +341,9 @@ def render_profile_page(
                 ),
                 Grid(
                     *[
-                        render_divergent_image(div, images_map)
+                        DivergentImage(div, images_map)
                         for div in contrarian
-                        if render_divergent_image(div, images_map) is not None
+                        if DivergentImage(div, images_map) is not None
                     ],
                 ),
             )
@@ -445,13 +353,13 @@ def render_profile_page(
         # Recent tierlists
         Div(
             H3("Recent Tierlists"),
-            render_recent_tierlists(user_tierlists, viewer_id),
+            RecentTierlists(user_tierlists),
         ),
         # Taste insights by category
         Div(
             H3("Taste Profile by Category"),
             P("Explore detailed taste analysis:"),
-            render_category_insights(taste_summary["categories"], profile_user_id),
+            CategoryInsights(taste_summary["categories"]),
         )
         if taste_summary["categories"]
         else None,

@@ -1,5 +1,5 @@
 import os
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from fasthtml.oauth import DiscordAppClient
 from fasthtml.components import Zero_md
 from routers.base_layout import get_full_layout
@@ -77,7 +77,7 @@ bware = Beforeware(
 )
 
 
-def _not_found(req, exc):
+def _not_found(req):
     logger.error(f"404 Not Found: {req.url.path}")
     content = Titled(
         H1("404 - Page Not Found", align="center"),
@@ -87,7 +87,7 @@ def _not_found(req, exc):
     return content
 
 
-def _server_error(req, exc):
+def _server_error(exc):
     logger.error(f"Internal Server Error: {str(exc)}")
     content = Titled(
         "500 - Internal Server Error",
@@ -142,7 +142,10 @@ async def security_headers(request, call_next):
     response = await call_next(request)
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers["content-type"] = "text/html; charset=utf-8"
-    if request.url.path.startswith("/static/"):
+
+    # Allow caching for static assets and signed image URLs
+    if request.url.path.startswith("/static/") or request.url.path.startswith("/images/img"):
+        # Preserve Cache-Control header set by the route handler
         cache_control = response.headers.get(
             "Cache-Control", "public, max-age=31536000, immutable"
         )

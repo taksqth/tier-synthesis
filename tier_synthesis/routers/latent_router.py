@@ -1,11 +1,13 @@
-from fasthtml.common import *
+from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout, tag
-from .images_router import get_category_images
-from .tierlist_router import get_category_tierlists
+from .images_router import DBImage, get_category_images, get_accessible_images
+from .tierlist_router import tierlist_to_ratings, get_category_tierlists
 from .users_router import get_user_avatar, get_anonymous_avatar, get_shared_group_users
+from services.storage import get_storage_service
+from components.hot_takes import HotTakes
+from components.popular_images import PopularImages
 import numpy as np
 import os
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,7 +17,6 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ============================================================================
 
-TIER_TO_RATING = {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1}
 DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23ccc'/%3E%3C/svg%3E"
 
 
@@ -31,8 +32,8 @@ db = database(os.environ.get("DB_PATH", "app/database.db"))
 # ============================================================================
 
 ar_latent = APIRouter(prefix="/insights")
-ar_latent.name = "Taste Insights"
-ar_latent.show = True
+ar_latent.name = "Taste Insights"  # type: ignore
+ar_latent.show = True  # type: ignore
 
 
 # ============================================================================
@@ -40,18 +41,9 @@ ar_latent.show = True
 # ============================================================================
 
 
-def tierlist_to_ratings(tierlist_data):
-    """Convert tierlist JSON data to a ratings dictionary."""
-    data = json.loads(tierlist_data)
-    ratings = {}
-    for tier, image_ids in data.items():
-        rating = TIER_TO_RATING.get(tier, 0)
-        for image_id in image_ids:
-            ratings[int(image_id)] = rating
-    return ratings
-
-
-def build_ratings_matrix(category, user_id, is_admin):
+def build_ratings_matrix(
+    category: str, user_id: str, is_admin: bool
+) -> Tuple[np.ndarray | None, list[tuple[str, str, bool]] | None, list[DBImage] | None]:
     category_images = get_category_images(category, user_id, is_admin)
     if not category_images:
         return None, None, None
@@ -102,7 +94,7 @@ def perform_nmf(ratings_matrix, n_components=3):
     n_users, n_images = ratings_matrix.shape
     n_components = min(n_components, n_users, n_images)
 
-    model = NMF(n_components=n_components, random_state=42, max_iter=500)
+    model = NMF(n_components=n_components, random_state=42, max_iter=500)  # type: ignore
     W = model.fit_transform(ratings_matrix)
     H = model.components_
 
@@ -119,7 +111,7 @@ def calculate_similarities(W_normalized):
     )
 
 
-def get_top_images_per_theme(H, images, n_components, top_n=5):
+def get_top_images_per_theme(H, images, n_components, top_n=8):
     return [
         [
             (images[idx], H[idx, theme_idx])
@@ -150,9 +142,11 @@ def get_display_label(owner_id, tierlist_name, share_group):
 # ============================================================================
 
 
-def render_taste_profile_card(preferences, label, avatar_url, n_components, owner_id=None, make_clickable=False):
+def TasteProfileCard(
+    preferences, label, avatar_url, n_components, owner_id=None, make_clickable=False
+):
     if make_clickable and owner_id:
-        user_display = Div(
+        user_display = Header(
             A(
                 Img(src=avatar_url or DEFAULT_AVATAR, alt="avatar", cls="avatar"),
                 H3(label),
@@ -163,7 +157,7 @@ def render_taste_profile_card(preferences, label, avatar_url, n_components, owne
             cls="profile-header",
         )
     else:
-        user_display = Div(
+        user_display = Header(
             Img(src=avatar_url or DEFAULT_AVATAR, alt="avatar", cls="avatar"),
             H3(label),
             cls="profile-header",
@@ -173,7 +167,10 @@ def render_taste_profile_card(preferences, label, avatar_url, n_components, owne
         user_display,
         *[
             Div(
-                P(f"Theme {i + 1}: {int(preferences[i] * 100)}%"),
+                A(
+                    P(f"Theme {i + 1}: {int(preferences[i] * 100)}%"),
+                    href=f"#theme-{i}",
+                ),
                 Progress(value=max(preferences[i], 0.01), max=1)
                 if preferences[i] > 0
                 else Div(cls="static-progress"),
@@ -183,28 +180,19 @@ def render_taste_profile_card(preferences, label, avatar_url, n_components, owne
     )
 
 
-def render_image_latent_card(image, latent_scores, n_components, user_id):
+def ImageLatentCard(image, latent_scores, n_components, user_id):
     from .users_router import get_user_avatar
+    from components.image_card import ImageCard
 
     username, avatar_url = get_user_avatar(image.owner_id)
 
-    return Card(
-        Div(
-            Img(src=avatar_url, alt="avatar", cls="avatar small"),
-            Small(username),
-            cls="user-info",
-        ),
-        A(
-            Img(
-                src=f"/images/thumbnail/{image.id}",
-                alt=image.name,
-                style="width: 100%; cursor: pointer;",
-            ),
-            href=f"/images/id/{image.id}",
-            hx_boost="true",
-            hx_target="#main",
-        ),
-        P(image.name),
+    metadata = Div(
+        Img(src=avatar_url, alt="avatar", cls="avatar small"),
+        Small(username),
+        cls="user-info",
+    )
+
+    footer = Div(
         tag("Owned" if image.owner_id == user_id else "Shared"),
         Div(
             *[
@@ -220,31 +208,40 @@ def render_image_latent_card(image, latent_scores, n_components, user_id):
         ),
     )
 
+    # Wrap ImageCard in Card to maintain same styling
+    return Card(ImageCard(image, metadata=metadata, footer=footer, show_name=True))
 
-def render_theme_images(top_images_per_theme, n_components, category):
+
+def ThemeImages(top_images_per_theme, n_components, category):
+    from components.image_grid import ImageGrid
+
+    storage = get_storage_service()
+
+    def render_simple_image(item):
+        img, _ = item
+        return Img(
+            src=storage.generate_signed_url(img.thumbnail_path),
+            alt=img.name,
+        )
+
     return [
-        Article(
-            H3(f"Theme {i + 1}"),
-            P("Top representatives:"),
-            Div(
-                *[
-                    Img(
-                        src=f"/images/thumbnail/{img.id}",
-                        alt=img.name,
-                        cls="theme-thumbnail",
-                    )
-                    for img, _ in top_images_per_theme[i]
-                ],
-                cls="theme-grid",
+        Div(
+            ImageGrid(
+                title=f"Theme {i + 1}",
+                description="Top representatives:",
+                images=top_images_per_theme[i],
+                action_button=A(
+                    "View full gallery →",
+                    href=f"{ar_latent.prefix}/gallery?category={category}&theme={i}",
+                    hx_boost="true",
+                    hx_target="#main",
+                    role="button",
+                    cls="secondary outline",
+                ),
+                render_card=render_simple_image,
+                single_row=True,
             ),
-            A(
-                "View full gallery →",
-                href=f"{ar_latent.prefix}/gallery?category={category}&theme={i}",
-                hx_boost="true",
-                hx_target="#main",
-                role="button",
-                cls="secondary outline",
-            ),
+            id=f"theme-{i}",
         )
         for i in range(n_components)
     ]
@@ -257,7 +254,7 @@ def get_avatar_for_profile(owner_id, share_group):
     return get_anonymous_avatar()[1]
 
 
-def render_your_profiles_section(
+def YourProfilesSection(
     current_user_indices,
     W_normalized,
     tierlist_labels,
@@ -271,7 +268,7 @@ def render_your_profiles_section(
     shown_indices = current_user_indices[:5]
 
     your_profiles = [
-        render_taste_profile_card(
+        TasteProfileCard(
             W_normalized[i],
             get_display_label(*tierlist_labels[i]),
             get_avatar_for_profile(tierlist_labels[i][0], tierlist_labels[i][2]),
@@ -290,7 +287,7 @@ def render_your_profiles_section(
 
     return Div(
         H2(title),
-        Grid(*your_profiles),
+        Grid(*your_profiles, cls="flex-wrap"),
         H3("Similar Tastes"),
         Ul(*[Li(f"{label} ({sim}% similar)") for label, sim in similar_tierlists[:3]])
         if similar_tierlists
@@ -298,27 +295,31 @@ def render_your_profiles_section(
     )
 
 
-def render_all_profiles_section(W_normalized, tierlist_labels, n_components):
-    return Details(
-        Summary("Everyone's Taste Profiles"),
-        Div(
-            *[
-                render_taste_profile_card(
-                    W_normalized[i],
-                    get_display_label(*tierlist_labels[i]),
-                    get_avatar_for_profile(tierlist_labels[i][0], tierlist_labels[i][2]),
-                    n_components,
-                    owner_id=tierlist_labels[i][0],
-                    make_clickable=tierlist_labels[i][2],
-                )
-                for i in range(len(tierlist_labels))
-            ],
-            cls="card-grid",
-        ),
+def AllProfilesSection(W_normalized, tierlist_labels, n_components):
+    return Article(
+        Details(
+            Summary(Header(H2("Everyone's Taste Profiles"))),
+            Grid(
+                *[
+                    TasteProfileCard(
+                        W_normalized[i],
+                        get_display_label(*tierlist_labels[i]),
+                        get_avatar_for_profile(
+                            tierlist_labels[i][0], tierlist_labels[i][2]
+                        ),
+                        n_components,
+                        owner_id=tierlist_labels[i][0],
+                        make_clickable=tierlist_labels[i][2],
+                    )
+                    for i in range(len(tierlist_labels))
+                ],
+                cls="flex-wrap",
+            ),
+        )
     )
 
 
-def render_insufficient_data_page(category, htmx, is_admin):
+def InsufficientDataPage(category, htmx, is_admin):
     return get_full_layout(
         Div(
             H1(f"Taste Insights: {category}"),
@@ -384,7 +385,7 @@ def select_category(htmx, request, session):
         people_count = len(set(tl.owner_id for tl in cat_tierlists))
 
         category_cards.append(
-            Article(
+            Card(
                 A(
                     Div(
                         H3(cat),
@@ -420,8 +421,8 @@ def analyze_category(category: str, htmx, request, session):
     ratings_matrix, tierlist_labels, images = build_ratings_matrix(
         category, user_id, is_admin
     )
-    if ratings_matrix is None:
-        return render_insufficient_data_page(category, htmx, is_admin)
+    if ratings_matrix is None or tierlist_labels is None or images is None:
+        return InsufficientDataPage(category, htmx, is_admin)
 
     n_components = min(3, ratings_matrix.shape[0], ratings_matrix.shape[1])
     W, H, _ = perform_nmf(ratings_matrix, n_components)
@@ -438,17 +439,8 @@ def analyze_category(category: str, htmx, request, session):
     )
     top_images_per_theme = get_top_images_per_theme(H, images, n_components)
 
-    your_profiles_section = render_your_profiles_section(
-        current_user_indices,
-        W_normalized,
-        tierlist_labels,
-        n_components,
-        similar_tierlists,
-    )
-    all_profiles_section = render_all_profiles_section(
-        W_normalized, tierlist_labels, n_components
-    )
-    theme_articles = render_theme_images(top_images_per_theme, n_components, category)
+    images_map = {img.id: img for img in get_accessible_images(user_id, is_admin)}
+    popular_images = PopularImages(category, images_map, limit=8)
 
     content = Div(
         Header(
@@ -466,11 +458,23 @@ def analyze_category(category: str, htmx, request, session):
         P(
             f"Analyzed {len(tierlist_labels)} tierlists with {len(images)} images across {n_components} themes."
         ),
-        your_profiles_section,
-        H2("The Themes"),
-        P("These are the underlying styles that explain different preferences:"),
-        *theme_articles,
-        all_profiles_section,
+        YourProfilesSection(
+            current_user_indices,
+            W_normalized,
+            tierlist_labels,
+            n_components,
+            similar_tierlists,
+        ),
+        AllProfilesSection(W_normalized, tierlist_labels, n_components),
+        HotTakes(user_id, category, images_map, limit=8),
+        *(popular_images if popular_images else []),
+        Article(
+            Details(
+                Summary(Header(H2("The Themes"))),
+                P("These are the underlying styles that explain different preferences:"),
+                *ThemeImages(top_images_per_theme, n_components, category),
+            )
+        ),
     )
 
     return get_full_layout(content, htmx, is_admin)
@@ -481,11 +485,9 @@ def image_latent_gallery(category: str, theme: int, htmx, request, session):
     user_id = session.get("user_id")
     is_admin = request.scope.get("is_admin", False)
 
-    ratings_matrix, tierlist_labels, images = build_ratings_matrix(
-        category, user_id, is_admin
-    )
-    if ratings_matrix is None:
-        return render_insufficient_data_page(category, htmx, is_admin)
+    ratings_matrix, _, images = build_ratings_matrix(category, user_id, is_admin)
+    if ratings_matrix is None or images is None:
+        return InsufficientDataPage(category, htmx, is_admin)
 
     n_components = min(3, ratings_matrix.shape[0], ratings_matrix.shape[1])
     if theme < 0 or theme >= n_components:
@@ -505,7 +507,7 @@ def image_latent_gallery(category: str, theme: int, htmx, request, session):
             is_admin,
         )
 
-    W, H, _ = perform_nmf(ratings_matrix, n_components)
+    _, H, _ = perform_nmf(ratings_matrix, n_components)
     H_normalized = H / H.max(axis=0, keepdims=True)
 
     image_index = {id(img): i for i, img in enumerate(images)}
@@ -529,14 +531,14 @@ def image_latent_gallery(category: str, theme: int, htmx, request, session):
             cls="flex-row",
         ),
         P(f"Images sorted by Theme {theme + 1} strength ({len(sorted_images)} total)"),
-        Div(
+        Grid(
             *[
-                render_image_latent_card(
+                ImageLatentCard(
                     img, H_normalized[image_index[id(img)]], n_components, user_id
                 )
                 for img, _ in sorted_images
             ],
-            cls="card-grid",
+            cls="flex-wrap",
         ),
     )
 
