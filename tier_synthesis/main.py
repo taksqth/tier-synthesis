@@ -46,7 +46,6 @@ users = db.create(
 def before(req, session):
     auth = req.scope["auth"] = session.get("user_id", None)
     if not auth or auth not in users:
-        logger.info(f"Auth: {req.scope['auth']}, User: {users[auth]}")
         if auth:
             session.clear()
         return RedirectResponse("/login", status_code=303)
