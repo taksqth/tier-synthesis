@@ -1,13 +1,19 @@
-from fasthtml.common import *
+from fasthtml import common as fh
 from .base_layout import get_full_layout, list_item, tag
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
+from typing import Any
 import os
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# MODELS
+# ============================================================================
 
 
 @dataclass
@@ -21,7 +27,9 @@ class DBTierlist:
     data: str
     created_at: str
 
-    def get_tier_data(self, images: list) -> tuple[dict[str, list[Any]], list[Any]]:
+    def get_tier_structure(
+        self, images: list[Any]
+    ) -> tuple[dict[str, list[Any]], list[Any]]:
         data = json.loads(self.data)
         result = {tier: [] for tier in self.TIERS}
         leftover_images = []
@@ -29,14 +37,14 @@ class DBTierlist:
         for image in images:
             for tier, image_ids in data.items():
                 if str(image.id) in image_ids:
-                    result[tier].append(self._get_image_element(image))
+                    result[tier].append(image)
                     break
             else:
-                leftover_images.append(self._get_image_element(image))
+                leftover_images.append(image)
 
         return result, leftover_images
 
-    def _get_tierlist_data_js(self) -> str:
+    def get_tierlist_data_js(self) -> str:
         return """Object.fromEntries(
             Array.from(document.querySelectorAll('[data-tier]')).map(tier => [
                 tier.dataset.tier,
@@ -44,270 +52,6 @@ class DBTierlist:
                     .map(div => div.dataset.imageId)
             ])
         )"""
-
-    def render_page(
-        self,
-        images: list,
-        can_edit: bool = True,
-        user_groups: list | None = None,
-        shared_group_ids: list | None = None,
-    ) -> Any:
-        from .users_router import get_user_avatar
-
-        filtered_images = [img for img in images if img.category == self.category]
-        tierlist_data, leftover_images = self.get_tier_data(filtered_images)
-        username, avatar_url = get_user_avatar(self.owner_id)
-
-        return Div(
-            Header(
-                H1("Image Tier List" + (" (Read Only)" if not can_edit else "")),
-                A(
-                    "Back to tierlists",
-                    href=f"{ar_tierlist.prefix}/list",
-                    hx_boost="true",
-                    hx_target="#main",
-                    cls="secondary",
-                    role="button",
-                ),
-                cls="flex-row",
-            ),
-            Div(
-                Img(
-                    src=avatar_url,
-                    alt="avatar",
-                    cls="avatar",
-                ),
-                Strong(username),
-                cls="user-info large",
-            ),
-            self._create_save_form(can_edit, user_groups or [], shared_group_ids or []),
-            P("Category: ", tag(self.category)),
-            *[
-                self._create_tier_row(tier, can_edit, tierlist_data[tier])
-                for tier in tierlist_data.keys()
-            ],
-            H2("Available Images"),
-            make_container(
-                Div(
-                    *leftover_images,
-                    cls="grid",
-                ),
-                can_edit,
-            ),
-            Script("""
-                (function() {
-                    const container = document.currentScript.parentElement;
-
-                    if (container._tierlistHandlersRegistered) return;
-                    container._tierlistHandlersRegistered = true;
-
-                    const getData = () => Alpine.$data(container);
-
-                    document.body.addEventListener('htmx:beforeRequest', function(e) {
-                        if (e.detail.elt && e.detail.elt.id === 'tierlist-save-btn') return;
-
-                        const data = getData();
-                        if (data && data.hasUnsavedChanges) {
-                            if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
-                                e.preventDefault();
-                            }
-                        }
-                    });
-
-                    window.addEventListener('beforeunload', function(e) {
-                        const data = getData();
-                        if (data && data.hasUnsavedChanges) {
-                            e.preventDefault();
-                            e.returnValue = '';
-                        }
-                    });
-                })();
-            """),
-            **{"x-data": "{ dragging: null, saving: false, hasUnsavedChanges: false }"},
-        )
-
-    def _get_image_element(self, image) -> Any:
-        return make_draggable(
-            Div(
-                Img(
-                    src=f"/images/thumbnail/{image.id}",
-                    alt=image.name,
-                    draggable="false",
-                    style="pointer-events: none;",
-                ),
-                data_image_id=str(image.id),
-            )
-        )
-
-    def _create_tier_row(self, tier: str, can_edit: bool, images: list | None = None):
-        """Create a tier row"""
-        return Div(
-            H2(tier),
-            make_container(
-                Div(
-                    *(images or []),
-                    cls="grid",
-                    data_tier=tier,
-                ),
-                can_edit,
-            ),
-        )
-
-    def _create_save_form(self, can_edit, user_groups, shared_group_ids):
-        return Fieldset(
-            Label(
-                "Name",
-                Group(
-                    Input(
-                        name="tierlist_name",
-                        value=self.name,
-                        placeholder="My Tierlist",
-                        id="tierlist-name-input",
-                        readonly=not can_edit,
-                        **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
-                    ),
-                    Button(
-                        "Save",
-                        hx_post=f"{ar_tierlist.prefix}/id/{self.id}",
-                        hx_vals=f"""js:{{
-                            tierlist_data: {self._get_tierlist_data_js()},
-                            name: document.getElementById('tierlist-name-input').value,
-                            shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
-                        }}""",
-                        hx_target="#main",
-                        hx_push_url="true",
-                        cls="primary",
-                        id="tierlist-save-btn",
-                        disabled=not can_edit,
-                        **{
-                            "x-bind:aria-busy": "saving",
-                            "@htmx:before-request": "saving = true; hasUnsavedChanges = false",
-                            "@htmx:after-request": "saving = false",
-                        }
-                        if can_edit
-                        else {},
-                    ),
-                    cls="flex-row",
-                ),
-            ),
-            (
-                Label(
-                    "Share with groups",
-                    *[
-                        CheckboxX(
-                            name="shared_groups",
-                            value=str(group["id"]),
-                            checked=group["id"] in shared_group_ids,
-                            disabled=not can_edit,
-                            label=group["groupname"],
-                            **{"@input": "hasUnsavedChanges = true"}
-                            if can_edit
-                            else {},
-                        )
-                        for group in user_groups
-                    ],
-                )
-                if user_groups
-                else None
-            ),
-        )
-
-    @staticmethod
-    def render_list(
-        tierlist_list: list["DBTierlist"],
-        user_id: str,
-        categories: list | None = None,
-        selected_category: str = "",
-        mine_only: bool = False,
-    ):
-        from .users_router import get_user_avatar
-
-        return Div(
-            Header(
-                H1("My Tierlists"),
-                A(
-                    "Create New",
-                    href=f"{ar_tierlist.prefix}/new",
-                    hx_boost="true",
-                    hx_target="#main",
-                    cls="primary",
-                    role="button",
-                ),
-                cls="flex-row",
-            ),
-            Div(
-                (
-                    Label(
-                        "Filter by category",
-                        Select(
-                            Option("All", value="", selected=(not selected_category)),
-                            *[
-                                Option(
-                                    cat, value=cat, selected=(cat == selected_category)
-                                )
-                                for cat in (categories or [])
-                            ],
-                            name="category",
-                            hx_get=f"{ar_tierlist.prefix}/list",
-                            hx_target="#main",
-                            hx_include="[name='mine_only']",
-                            hx_push_url="true",
-                        ),
-                    )
-                    if categories
-                    else None
-                ),
-                CheckboxX(
-                    name="mine_only",
-                    value="true",
-                    checked=mine_only,
-                    label="Show only mine",
-                    hx_get=f"{ar_tierlist.prefix}/list",
-                    hx_target="#main",
-                    hx_include="[name='category']",
-                ),
-                style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
-            ),
-            *[
-                list_item(
-                    Div(
-                        A(
-                            Div(
-                                Img(
-                                    src=get_user_avatar(tierlist.owner_id)[1],
-                                    alt="avatar",
-                                    cls="avatar",
-                                ),
-                                Small(get_user_avatar(tierlist.owner_id)[0]),
-                                cls="user-info",
-                            ),
-                            Strong(tierlist.name),
-                            f" - {tierlist.created_at[:10]}",
-                            Br(),
-                            tag(tierlist.category),
-                            tag("Owned" if tierlist.owner_id == user_id else "Shared"),
-                            href=f"{ar_tierlist.prefix}/id/{tierlist.id}",
-                            hx_boost="true",
-                            hx_target="#main",
-                        ),
-                        rating_display(tierlist, user_id),
-                    ),
-                    Button(
-                        "Delete",
-                        hx_delete=f"{ar_tierlist.prefix}/id/{tierlist.id}",
-                        hx_confirm="Delete this tierlist?",
-                        hx_target="#main",
-                        hx_push_url="true",
-                        cls="secondary outline",
-                    )
-                    if tierlist.owner_id == user_id
-                    else None,
-                )
-                for tierlist in tierlist_list
-            ]
-            if tierlist_list
-            else P("No tierlists yet. Create one to get started!"),
-        )
 
 
 @dataclass
@@ -334,7 +78,11 @@ class TierlistComment:
     created_at: str
 
 
-db = database(os.environ.get("DB_PATH", "app/database.db"))
+# ============================================================================
+# DATABASE SETUP
+# ============================================================================
+
+db = fh.database(os.environ.get("DB_PATH", "app/database.db"))
 tierlists = db.create(
     DBTierlist,
     pk="id",
@@ -361,7 +109,14 @@ tierlist_comments = db.create(
 )
 
 
-def get_accessible_tierlists(user_id: str, is_admin: bool, fetch_all: bool = False):
+# ============================================================================
+# DATA ACCESS LAYER
+# ============================================================================
+
+
+def get_accessible_tierlists(
+    user_id: str, is_admin: bool, fetch_all: bool = False
+) -> list[DBTierlist]:
     if is_admin or fetch_all:
         result = db.q("SELECT * FROM db_tierlist ORDER BY created_at DESC")
     else:
@@ -381,7 +136,7 @@ def get_accessible_tierlists(user_id: str, is_admin: bool, fetch_all: bool = Fal
 
 
 @lru_cache(maxsize=256)
-def get_user_rating(tierlist_id: int, user_id: str):
+def get_user_rating(tierlist_id: int, user_id: str) -> TierlistRating | None:
     return next(
         iter(
             tierlist_ratings("tierlist_id = ? and user_id = ?", (tierlist_id, user_id))
@@ -390,11 +145,13 @@ def get_user_rating(tierlist_id: int, user_id: str):
     )
 
 
-def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
+def get_tierlist_metadata(
+    tierlist_ids: list[int], user_id: str | None = None
+) -> dict[int, dict[str, Any]]:
     if not tierlist_ids:
         return {}
 
-    placeholders = ','.join('?' * len(tierlist_ids))
+    placeholders = ",".join("?" * len(tierlist_ids))
 
     rating_result = db.q(
         f"""
@@ -406,7 +163,7 @@ def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
         WHERE tierlist_id IN ({placeholders})
         GROUP BY tierlist_id
         """,
-        tierlist_ids
+        tierlist_ids,
     )
 
     comment_result = db.q(
@@ -416,11 +173,18 @@ def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
         WHERE tierlist_id IN ({placeholders})
         GROUP BY tierlist_id
         """,
-        tierlist_ids
+        tierlist_ids,
     )
 
-    result = {tid: {"love_count": 0, "tomato_count": 0, "user_rating": None, "comment_count": 0}
-              for tid in tierlist_ids}
+    result = {
+        tid: {
+            "love_count": 0,
+            "tomato_count": 0,
+            "user_rating": None,
+            "comment_count": 0,
+        }
+        for tid in tierlist_ids
+    }
 
     for row in rating_result:
         result[row["tierlist_id"]]["love_count"] = row["love_count"] or 0
@@ -436,7 +200,7 @@ def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
             FROM tierlist_rating
             WHERE tierlist_id IN ({placeholders}) AND user_id = ?
             """,
-            [*tierlist_ids, user_id]
+            [*tierlist_ids, user_id],
         )
         for row in user_rating_result:
             result[row["tierlist_id"]]["user_rating"] = row["rating"]
@@ -444,7 +208,9 @@ def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
     return result
 
 
-def enrich_tierlists_with_ratings(tierlist_list: list[DBTierlist], user_id: str | None = None):
+def enrich_tierlists_with_ratings(
+    tierlist_list: list[DBTierlist], user_id: str | None = None
+) -> list[DBTierlist]:
     if not tierlist_list:
         return tierlist_list
 
@@ -452,31 +218,29 @@ def enrich_tierlists_with_ratings(tierlist_list: list[DBTierlist], user_id: str 
 
     for tierlist in tierlist_list:
         data = metadata[tierlist.id]
-        tierlist.love_count = data["love_count"]
-        tierlist.tomato_count = data["tomato_count"]
-        tierlist.user_rating = data["user_rating"]
-        tierlist.comment_count = data["comment_count"]
+        tierlist.love_count = data["love_count"]  # type: ignore[attr-defined]
+        tierlist.tomato_count = data["tomato_count"]  # type: ignore[attr-defined]
+        tierlist.user_rating = data["user_rating"]  # type: ignore[attr-defined]
+        tierlist.comment_count = data["comment_count"]  # type: ignore[attr-defined]
 
     return tierlist_list
 
 
-def get_rating_repr(rating: int) -> str:
-    if rating == 1:
-        return " ❤️"
-    if rating == -1:
-        return " 👎"
-    return ""
+# ============================================================================
+# ROUTER SETUP
+# ============================================================================
+
+ar_tierlist = fh.APIRouter(prefix="/tierlist")
+ar_tierlist.name = "Tierlist"  # type: ignore[attr-defined]
+ar_tierlist.show = True  # type: ignore[attr-defined]
 
 
-# Router setup
-ar_tierlist = APIRouter(prefix="/tierlist")
-ar_tierlist.name = "Tierlist"
-ar_tierlist.show = True
+# ============================================================================
+# FEATURE: TIERLIST CRUD
+# ============================================================================
 
 
-# TODO: Move to a separate module later as more generic utility functions
-def make_draggable(element):
-    """Make an element draggable with drag and drop events using Alpine.js"""
+def make_draggable(element: Any) -> Any:
     return element(
         **{
             "x-on:dragstart": "dragging = $el",
@@ -486,8 +250,9 @@ def make_draggable(element):
     )
 
 
-def make_container(element, can_edit, background_color="#f5f5f5"):
-    """Create a draggable container with drop zone functionality using Alpine.js"""
+def make_container(
+    element: Any, can_edit: bool, background_color: str = "#f5f5f5"
+) -> Any:
     return element(
         **{
             "x-on:dragover": "$event.preventDefault()",
@@ -518,22 +283,293 @@ def make_container(element, can_edit, background_color="#f5f5f5"):
     )
 
 
-# Routes
+def render_draggable_image(image: Any, can_edit: bool) -> Any:
+    # Each image triggers a separate HTTP request to /images/thumbnail/{id}
+    # This is a lazy-loading approach suitable for CDN
+    element = fh.Div(
+        fh.Img(
+            src=f"/images/thumbnail/{image.id}",
+            alt=image.name,
+            draggable="false",
+            style="pointer-events: none;",
+            loading="lazy",
+        ),
+        data_image_id=str(image.id),
+    )
+    return make_draggable(element) if can_edit else element
+
+
+def render_tier_row(tier: str, images: list[Any], can_edit: bool) -> Any:
+    return fh.Div(
+        fh.H2(tier),
+        make_container(
+            fh.Div(
+                *[render_draggable_image(img, can_edit) for img in images],
+                cls="grid",
+                data_tier=tier,
+            ),
+            can_edit,
+        ),
+    )
+
+
+def render_save_form(
+    tierlist: DBTierlist,
+    can_edit: bool,
+    user_groups: list[dict],
+    shared_group_ids: list[int],
+) -> Any:
+    return fh.Fieldset(
+        fh.Label(
+            "Name",
+            fh.Group(
+                fh.Input(
+                    name="tierlist_name",
+                    value=tierlist.name,
+                    placeholder="My Tierlist",
+                    id="tierlist-name-input",
+                    readonly=not can_edit,
+                    **{"@input": "hasUnsavedChanges = true"} if can_edit else {},  # type: ignore[arg-type]
+                ),
+                fh.Button(
+                    "Save",
+                    hx_post=f"{ar_tierlist.prefix}/id/{tierlist.id}",
+                    hx_vals=f"""js:{{
+                        tierlist_data: {tierlist.get_tierlist_data_js()},
+                        name: document.getElementById('tierlist-name-input').value,
+                        shared_groups: Array.from(document.querySelectorAll('input[name="shared_groups"]:checked')).map(cb => cb.value).join(',')
+                    }}""",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="primary",
+                    id="tierlist-save-btn",
+                    disabled=not can_edit,
+                    **{
+                        "x-bind:aria-busy": "saving",
+                        "@htmx:before-request": "saving = true; hasUnsavedChanges = false",
+                        "@htmx:after-request": "saving = false",
+                    }
+                    if can_edit
+                    else {},  # type: ignore[arg-type]
+                ),
+                cls="flex-row",
+            ),
+        ),
+        (
+            fh.Label(
+                "Share with groups",
+                *[
+                    fh.CheckboxX(
+                        name="shared_groups",
+                        value=str(group["id"]),
+                        checked=group["id"] in shared_group_ids,
+                        disabled=not can_edit,
+                        label=group["groupname"],
+                        **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
+                    )
+                    for group in user_groups
+                ],
+            )
+            if user_groups
+            else None
+        ),
+    )
+
+
+def render_tierlist_page(
+    tierlist: DBTierlist,
+    images: list[Any],
+    can_edit: bool = True,
+    user_groups: list[dict] | None = None,
+    shared_group_ids: list[int] | None = None,
+) -> Any:
+    from .users_router import get_user_avatar
+
+    filtered_images = [img for img in images if img.category == tierlist.category]
+    tier_structure, leftover_images = tierlist.get_tier_structure(filtered_images)
+    username, avatar_url = get_user_avatar(tierlist.owner_id)
+
+    return fh.Div(
+        fh.Header(
+            fh.H1("Image Tier List" + (" (Read Only)" if not can_edit else "")),
+            fh.A(
+                "Back to tierlists",
+                href=f"{ar_tierlist.prefix}/list",
+                hx_boost="true",
+                hx_target="#main",
+                cls="secondary",
+                role="button",
+            ),
+            cls="flex-row",
+        ),
+        fh.Div(
+            fh.Img(
+                src=avatar_url,
+                alt="avatar",
+                cls="avatar",
+            ),
+            fh.Strong(username),
+            cls="user-info large",
+        ),
+        render_save_form(tierlist, can_edit, user_groups or [], shared_group_ids or []),
+        fh.P("Category: ", tag(tierlist.category)),
+        *[
+            render_tier_row(tier, tier_structure[tier], can_edit)
+            for tier in tier_structure.keys()
+        ],
+        fh.H2("Available Images"),
+        make_container(
+            fh.Div(
+                *[render_draggable_image(img, can_edit) for img in leftover_images],
+                cls="grid",
+            ),
+            can_edit,
+        ),
+        fh.Script("""
+            (function() {
+                const container = document.currentScript.parentElement;
+
+                if (container._tierlistHandlersRegistered) return;
+                container._tierlistHandlersRegistered = true;
+
+                const getData = () => Alpine.$data(container);
+
+                document.body.addEventListener('htmx:beforeRequest', function(e) {
+                    if (e.detail.elt && e.detail.elt.id === 'tierlist-save-btn') return;
+
+                    const data = getData();
+                    if (data && data.hasUnsavedChanges) {
+                        if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
+                            e.preventDefault();
+                        }
+                    }
+                });
+
+                window.addEventListener('beforeunload', function(e) {
+                    const data = getData();
+                    if (data && data.hasUnsavedChanges) {
+                        e.preventDefault();
+                        e.returnValue = '';
+                    }
+                });
+            })();
+        """),
+        **{"x-data": "{ dragging: null, saving: false, hasUnsavedChanges: false }"},  # type: ignore[arg-type]
+    )
+
+
+def render_tierlist_list(
+    tierlist_list: list[DBTierlist],
+    user_id: str,
+    categories: list[str] | None = None,
+    selected_category: str = "",
+    mine_only: bool = False,
+) -> Any:
+    from .users_router import get_user_avatar
+
+    return fh.Div(
+        fh.Header(
+            fh.H1("My Tierlists"),
+            fh.A(
+                "Create New",
+                href=f"{ar_tierlist.prefix}/new",
+                hx_boost="true",
+                hx_target="#main",
+                cls="primary",
+                role="button",
+            ),
+            cls="flex-row",
+        ),
+        fh.Div(
+            (
+                fh.Label(
+                    "Filter by category",
+                    fh.Select(
+                        fh.Option("All", value="", selected=(not selected_category)),
+                        *[
+                            fh.Option(
+                                cat, value=cat, selected=(cat == selected_category)
+                            )
+                            for cat in (categories or [])
+                        ],
+                        name="category",
+                        hx_get=f"{ar_tierlist.prefix}/list",
+                        hx_target="#main",
+                        hx_include="[name='mine_only']",
+                        hx_push_url="true",
+                    ),
+                )
+                if categories
+                else None
+            ),
+            fh.CheckboxX(
+                name="mine_only",
+                value="true",
+                checked=mine_only,
+                label="Show only mine",
+                hx_get=f"{ar_tierlist.prefix}/list",
+                hx_target="#main",
+                hx_include="[name='category']",
+            ),
+            style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;",
+        ),
+        *[
+            list_item(
+                fh.Div(
+                    fh.A(
+                        fh.Div(
+                            fh.Img(
+                                src=get_user_avatar(tierlist.owner_id)[1],
+                                alt="avatar",
+                                cls="avatar",
+                            ),
+                            fh.Small(get_user_avatar(tierlist.owner_id)[0]),
+                            cls="user-info",
+                        ),
+                        fh.Strong(tierlist.name),
+                        f" - {tierlist.created_at[:10]}",
+                        fh.Br(),
+                        tag(tierlist.category),
+                        tag("Owned" if tierlist.owner_id == user_id else "Shared"),
+                        href=f"{ar_tierlist.prefix}/id/{tierlist.id}",
+                        hx_boost="true",
+                        hx_target="#main",
+                    ),
+                    rating_display(tierlist),
+                ),
+                fh.Button(
+                    "Delete",
+                    hx_delete=f"{ar_tierlist.prefix}/id/{tierlist.id}",
+                    hx_confirm="Delete this tierlist?",
+                    hx_target="#main",
+                    hx_push_url="true",
+                    cls="secondary outline",
+                )
+                if tierlist.owner_id == user_id
+                else None,
+            )
+            for tierlist in tierlist_list
+        ]
+        if tierlist_list
+        else fh.P("No tierlists yet. Create one to get started!"),
+    )
+
+
 @ar_tierlist.get("/new", name="Make new tierlist")
-def create_new_tierlist(htmx, req):
+def create_new_tierlist(htmx, req) -> Any:
     from .images_router import category_input
     from .category_utils import get_all_categories
 
     is_admin = req.scope.get("is_admin", False)
     categories = get_all_categories()
 
-    content = Div(
-        H1("Create New Tierlist"),
-        Form(
-            Fieldset(
-                Label(
+    content = fh.Div(
+        fh.H1("Create New Tierlist"),
+        fh.Form(
+            fh.Fieldset(
+                fh.Label(
                     "Name",
-                    Input(
+                    fh.Input(
                         name="name",
                         required=True,
                         placeholder="My Tierlist",
@@ -542,7 +578,7 @@ def create_new_tierlist(htmx, req):
                 category_input(
                     categories, input_id="new-tierlist-category", required=True
                 ),
-                Button("Create", type="submit"),
+                fh.Button("Create", type="submit"),
             ),
             hx_post=f"{ar_tierlist.prefix}/new",
             hx_target="#main",
@@ -553,7 +589,7 @@ def create_new_tierlist(htmx, req):
 
 
 @ar_tierlist.post("/new")
-def post_new_tierlist(name: str, category: str, htmx, req):
+def post_new_tierlist(name: str, category: str, htmx, req) -> Any:
     from .category_utils import validate_and_get_category
 
     owner_id = req.scope["auth"]
@@ -563,7 +599,7 @@ def post_new_tierlist(name: str, category: str, htmx, req):
         validated_category = validate_and_get_category(category)
     except ValueError as e:
         return get_full_layout(
-            P(f"Category error: {e}", style="color: red;"), htmx, is_admin
+            fh.P(f"Category error: {e}", style="color: red;"), htmx, is_admin
         )
 
     tierlist = tierlists.insert(
@@ -578,7 +614,7 @@ def post_new_tierlist(name: str, category: str, htmx, req):
 
 
 @ar_tierlist.get("/id/{id}")
-def get_tierlist_editor(id: int, htmx, req):
+def get_tierlist_editor(id: int, htmx, req) -> Any:
     from .images_router import get_accessible_images
 
     logger.info(tierlists)
@@ -590,8 +626,8 @@ def get_tierlist_editor(id: int, htmx, req):
     if not any(tl.id == id for tl in accessible_tierlists):
         return get_full_layout(
             (
-                H1("Access Denied"),
-                P("You don't have access to this tierlist."),
+                fh.H1("Access Denied"),
+                fh.P("You don't have access to this tierlist."),
             ),
             htmx,
             is_admin,
@@ -617,8 +653,8 @@ def get_tierlist_editor(id: int, htmx, req):
     ]
 
     images_query = get_accessible_images(user_id, is_admin, with_blobs=False)
-    content = tierlist.render_page(
-        images_query, can_edit, user_groups, shared_group_ids
+    content = render_tierlist_page(
+        tierlist, images_query, can_edit, user_groups, shared_group_ids
     )
 
     return get_full_layout(content, htmx, is_admin)
@@ -632,7 +668,7 @@ def save_tierlist(
     shared_groups: str,
     htmx,
     req,
-):
+) -> Any:
     owner_id = req.scope["auth"]
     is_admin = req.scope.get("is_admin", False)
     logger.debug(f"Saving tierlist. ID: {id}, Data: {tierlist_data}")
@@ -643,7 +679,7 @@ def save_tierlist(
         logger.warning(
             f"User {owner_id} attempted to update tierlist {id} owned by {tierlist.owner_id}"
         )
-        return RedirectResponse("/unauthorized", status_code=303)
+        return fh.RedirectResponse("/unauthorized", status_code=303)
 
     tierlist.data = tierlist_data
     tierlist.name = name
@@ -658,9 +694,9 @@ def save_tierlist(
                 )
 
     main_content = get_tierlist_editor(id, htmx, req)
-    toast = Div(
-        Ins("Saved successfully"),
-        Script("""
+    toast = fh.Div(
+        fh.Ins("Saved successfully"),
+        fh.Script("""
             setTimeout(() => {
                 const toast = document.getElementById('toast');
                 if (toast) toast.classList.remove('show');
@@ -668,14 +704,14 @@ def save_tierlist(
         """),
         id="toast",
         cls="show",
-        **{"hx-swap-oob": "true"},
+        hx_swap_oob="true",
     )
 
     return main_content, toast
 
 
 @ar_tierlist.get("/list", name="Browse Tierlists")
-def list_tierlists(htmx, req, category: str = "", mine_only: str = ""):
+def list_tierlists(htmx, req, category: str = "", mine_only: str = "") -> Any:
     user_id = req.scope["auth"]
     is_admin = req.scope.get("is_admin", False)
     tierlist_list = get_accessible_tierlists(user_id, is_admin)
@@ -692,15 +728,15 @@ def list_tierlists(htmx, req, category: str = "", mine_only: str = ""):
 
     enrich_tierlists_with_ratings(filtered_tierlists, user_id)
 
-    content = DBTierlist.render_list(
+    content = render_tierlist_list(
         filtered_tierlists, user_id, categories, category, mine_only == "true"
     )
     return get_full_layout(content, htmx, is_admin)
 
 
 @ar_tierlist.delete("/id/{id}")
-def delete_tierlist(id: str, htmx, req):
-    owner_id = req.scope["user_id"]
+def delete_tierlist(id: str, htmx, req) -> Any:
+    owner_id = req.scope["auth"]
     is_admin = req.scope.get("is_admin", False)
     tierlist = tierlists[id]
 
@@ -708,17 +744,30 @@ def delete_tierlist(id: str, htmx, req):
         logger.warning(
             f"User {owner_id} attempted to delete tierlist {id} owned by {tierlist.owner_id}"
         )
-        return RedirectResponse("/unauthorized", status_code=303)
+        return fh.RedirectResponse("/unauthorized", status_code=303)
 
     tierlists.delete(id)
 
     return list_tierlists(htmx, req)
 
 
+# ============================================================================
+# FEATURE: RATINGS
+# ============================================================================
+
+
+def get_rating_repr(rating: int) -> str:
+    if rating == 1:
+        return " ❤️"
+    if rating == -1:
+        return " 👎"
+    return ""
+
+
 def rating_button(
     emoji: str, count: int, rating_value: int, tierlist_id: int, is_active: bool
-):
-    return Button(
+) -> Any:
+    return fh.Button(
         f"{emoji} {count}",
         hx_post=f"{ar_tierlist.prefix}/id/{tierlist_id}/rate",
         hx_vals=f'{{"rating": {rating_value}}}',
@@ -728,46 +777,46 @@ def rating_button(
     )
 
 
-def rating_display(tierlist: DBTierlist, user_id: str):
-    return Div(
+def rating_display(tierlist: DBTierlist) -> Any:
+    return fh.Div(
         rating_button(
             emoji=get_rating_repr(-1),
-            count=tierlist.tomato_count,
+            count=tierlist.tomato_count,  # type: ignore[attr-defined]
             rating_value=-1,
             tierlist_id=tierlist.id,
-            is_active=(tierlist.user_rating == -1),
+            is_active=(tierlist.user_rating == -1),  # type: ignore[attr-defined]
         ),
         rating_button(
             emoji=get_rating_repr(1),
-            count=tierlist.love_count,
+            count=tierlist.love_count,  # type: ignore[attr-defined]
             rating_value=1,
             tierlist_id=tierlist.id,
-            is_active=(tierlist.user_rating == 1),
+            is_active=(tierlist.user_rating == 1),  # type: ignore[attr-defined]
         ),
-        Button(
-            f"💬 {tierlist.comment_count}",
+        fh.Button(
+            f"💬 {tierlist.comment_count}",  # type: ignore[attr-defined]
             hx_get=f"{ar_tierlist.prefix}/id/{tierlist.id}/comments",
             hx_target=f"#comments-modal-{tierlist.id}",
             hx_swap="innerHTML",
             onclick=f"document.getElementById('comments-modal-{tierlist.id}').showModal()",
             cls="rating-button outline secondary",
         ),
-        Dialog(id=f"comments-modal-{tierlist.id}", style="width: 600px;"),
+        fh.Dialog(id=f"comments-modal-{tierlist.id}", style="width: 600px;"),
         id=f"ratings-{tierlist.id}",
         cls="rating-container",
     )
 
 
 @ar_tierlist.post("/id/{id}/rate")
-def rate_tierlist(id: int, rating: int, req):
+def rate_tierlist(id: int, rating: int, req: Any) -> Any:
     user_id = req.scope["auth"]
 
     if rating not in [-1, 1]:
         tierlist = tierlists[id]
         enrich_tierlists_with_ratings([tierlist], user_id)
-        return rating_display(tierlist, user_id)
+        return rating_display(tierlist)
 
-    user_rating = get_user_rating(id, user_id)
+    user_rating = get_user_rating(id)
     if user_rating:
         if user_rating.rating == rating:
             tierlist_ratings.delete(user_rating.id)
@@ -782,54 +831,59 @@ def rate_tierlist(id: int, rating: int, req):
     get_user_rating.cache_clear()
     tierlist = tierlists[id]
     enrich_tierlists_with_ratings([tierlist], user_id)
-    return rating_display(tierlist, user_id)
+    return rating_display(tierlist)
 
 
-def render_comment(comment: TierlistComment):
+# ============================================================================
+# FEATURE: COMMENTS
+# ============================================================================
+
+
+def render_comment(comment: TierlistComment) -> Any:
     from .users_router import get_user_avatar
 
     username, avatar_url = get_user_avatar(comment.user_id)
     user_rating = get_user_rating(comment.tierlist_id, comment.user_id)
     vote_indicator = get_rating_repr(user_rating.rating) if user_rating else ""
 
-    return Article(
-        Div(
-            Img(src=avatar_url, alt="avatar", cls="avatar"),
-            Div(
-                Strong(username + vote_indicator),
-                Small(comment.created_at[:16], cls="text-muted"),
+    return fh.Article(
+        fh.Div(
+            fh.Img(src=avatar_url, alt="avatar", cls="avatar"),
+            fh.Div(
+                fh.Strong(username + vote_indicator),
+                fh.Small(comment.created_at[:16], cls="text-muted"),
             ),
             cls="user-info",
         ),
-        P(comment.comment),
+        fh.P(comment.comment),
         cls="comment-item",
     )
 
 
 @ar_tierlist.get("/id/{id}/comments")
-def get_comments(id: int):
+def get_comments(id: int) -> Any:
     comment_list = tierlist_comments(
         "tierlist_id = ?", (id,), order_by="created_at DESC"
     )
 
-    return Div(
-        Article(
-            H3("Comments"),
-            Div(
+    return fh.Div(
+        fh.Article(
+            fh.H3("Comments"),
+            fh.Div(
                 *[render_comment(c) for c in comment_list]
                 if comment_list
-                else [P("No comments yet")],
+                else [fh.P("No comments yet")],
                 cls="comments-list",
             ),
-            Form(
-                Fieldset(
-                    Textarea(
+            fh.Form(
+                fh.Fieldset(
+                    fh.Textarea(
                         name="comment",
                         placeholder="Write a comment...",
                         required=True,
                         rows="3",
                     ),
-                    Button("Post Comment", type="submit"),
+                    fh.Button("Post Comment", type="submit"),
                 ),
                 hx_post=f"{ar_tierlist.prefix}/id/{id}/comments",
                 hx_target=f"#comments-modal-{id}",
@@ -840,7 +894,7 @@ def get_comments(id: int):
 
 
 @ar_tierlist.post("/id/{id}/comments")
-def post_comment(id: int, comment: str, req):
+def post_comment(id: int, comment: str, req: Any) -> tuple[Any, Any]:
     user_id = req.scope["auth"]
 
     tierlist_comments.insert(
@@ -853,10 +907,14 @@ def post_comment(id: int, comment: str, req):
     tierlist = tierlists[id]
     enrich_tierlists_with_ratings([tierlist], user_id)
 
-    return get_comments(id), Div(
-        rating_display(tierlist, user_id),
+    return get_comments(id), fh.Div(
+        rating_display(tierlist),
         hx_swap_oob=f"true:#ratings-{id}",
     )
 
+
+# ============================================================================
+# EXPORT
+# ============================================================================
 
 tierlist_router = ar_tierlist
