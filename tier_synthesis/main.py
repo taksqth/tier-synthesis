@@ -46,6 +46,7 @@ users = db.create(
 def before(req, session):
     auth = req.scope["auth"] = session.get("user_id", None)
     if not auth or auth not in users:
+        logger.info(f"Auth: {req.scope['auth']}, User: {users[auth]}")
         if auth:
             session.clear()
         return RedirectResponse("/login", status_code=303)
@@ -102,7 +103,9 @@ def _server_error(req, exc):
 
 def on_startup():
     from migrations import run_migrations
+
     run_migrations()
+
 
 app, rt = fast_app(
     hdrs=(
@@ -141,18 +144,23 @@ async def security_headers(request, call_next):
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers["content-type"] = "text/html; charset=utf-8"
     if request.url.path.startswith("/static/"):
-        cache_control = response.headers.get("Cache-Control", "public, max-age=31536000, immutable")
+        cache_control = response.headers.get(
+            "Cache-Control", "public, max-age=31536000, immutable"
+        )
     else:
         cache_control = "no-cache"
 
-    response.headers.update({
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Cache-Control": cache_control,
-    })
+    response.headers.update(
+        {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "SAMEORIGIN",
+            "Cache-Control": cache_control,
+        }
+    )
     if "Expires" in response.headers:
         del response.headers["Expires"]
     return response
+
 
 for router in get_api_routers():
     router.to_app(app)
@@ -178,7 +186,9 @@ def get_discord_client():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse("favicon.ico", headers={"Cache-Control": "public, max-age=86400"})
+    return FileResponse(
+        "favicon.ico", headers={"Cache-Control": "public, max-age=86400"}
+    )
 
 
 @app.get("/login")
@@ -223,7 +233,7 @@ def logout(session):
 
 @app.get("/auth_redirect")
 async def auth_redirect(
-    code: str = "", username: str = "", authorized: str = "", session=None
+    session, code: str = "", username: str = "", authorized: str = ""
 ):
     admin_user_id = os.environ.get("ADMIN_USER_ID")
 

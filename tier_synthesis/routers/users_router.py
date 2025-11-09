@@ -1,6 +1,7 @@
 from fasthtml.common import *
 from .base_layout import get_full_layout
 from dataclasses import dataclass
+from functools import lru_cache
 import os
 import logging
 
@@ -72,6 +73,7 @@ DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' w
 ANONYMOUS_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Ccircle cx='24' cy='24' r='20' fill='%23999'/%3E%3Ctext x='24' y='30' text-anchor='middle' fill='white' font-size='20'%3E%3F%3C/text%3E%3C/svg%3E"
 
 
+@lru_cache(maxsize=128)
 def get_user_avatar(owner_id: str):
     user_data = db.q("SELECT username, avatar FROM user WHERE id = ?", [owner_id])
     if user_data:

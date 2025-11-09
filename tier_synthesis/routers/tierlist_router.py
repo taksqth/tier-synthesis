@@ -2,6 +2,7 @@ from fasthtml.common import *
 from .base_layout import get_full_layout, list_item, tag
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 import os
 import json
 import logging
@@ -20,13 +21,11 @@ class DBTierlist:
     data: str
     created_at: str
 
-    def get_tier_data(self, images: list) -> dict:
-        """Get tierlist data with image elements"""
-        logger.debug(f"Loading tier data from JSON: {self.data}")
+    def get_tier_data(self, images: list) -> tuple[dict[str, list[Any]], list[Any]]:
         data = json.loads(self.data)
-
         result = {tier: [] for tier in self.TIERS}
         leftover_images = []
+
         for image in images:
             for tier, image_ids in data.items():
                 if str(image.id) in image_ids:
@@ -34,10 +33,10 @@ class DBTierlist:
                     break
             else:
                 leftover_images.append(self._get_image_element(image))
+
         return result, leftover_images
 
     def _get_tierlist_data_js(self) -> str:
-        """Get JavaScript to extract tierlist data from the DOM"""
         return """Object.fromEntries(
             Array.from(document.querySelectorAll('[data-tier]')).map(tier => [
                 tier.dataset.tier,
@@ -50,9 +49,9 @@ class DBTierlist:
         self,
         images: list,
         can_edit: bool = True,
-        user_groups: list = None,
-        shared_group_ids: list = None,
-    ) -> Container:
+        user_groups: list | None = None,
+        shared_group_ids: list | None = None,
+    ) -> Any:
         from .users_router import get_user_avatar
 
         filtered_images = [img for img in images if img.category == self.category]
@@ -127,7 +126,7 @@ class DBTierlist:
             **{"x-data": "{ dragging: null, saving: false, hasUnsavedChanges: false }"},
         )
 
-    def _get_image_element(self, image):
+    def _get_image_element(self, image) -> Any:
         return make_draggable(
             Div(
                 Img(
@@ -140,7 +139,7 @@ class DBTierlist:
             )
         )
 
-    def _create_tier_row(self, tier: str, can_edit: bool, images: list = None):
+    def _create_tier_row(self, tier: str, can_edit: bool, images: list | None = None):
         """Create a tier row"""
         return Div(
             H2(tier),
@@ -201,7 +200,9 @@ class DBTierlist:
                             checked=group["id"] in shared_group_ids,
                             disabled=not can_edit,
                             label=group["groupname"],
-                            **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
+                            **{"@input": "hasUnsavedChanges = true"}
+                            if can_edit
+                            else {},
                         )
                         for group in user_groups
                     ],
@@ -215,7 +216,7 @@ class DBTierlist:
     def render_list(
         tierlist_list: list["DBTierlist"],
         user_id: str,
-        categories: list = None,
+        categories: list | None = None,
         selected_category: str = "",
         mine_only: bool = False,
     ):
@@ -289,7 +290,7 @@ class DBTierlist:
                             hx_boost="true",
                             hx_target="#main",
                         ),
-                        rating_display(tierlist.id, user_id),
+                        rating_display(tierlist, user_id),
                     ),
                     Button(
                         "Delete",
@@ -379,6 +380,94 @@ def get_accessible_tierlists(user_id: str, is_admin: bool, fetch_all: bool = Fal
     return [DBTierlist(**row) for row in result]
 
 
+@lru_cache(maxsize=256)
+def get_user_rating(tierlist_id: int, user_id: str):
+    return next(
+        iter(
+            tierlist_ratings("tierlist_id = ? and user_id = ?", (tierlist_id, user_id))
+        ),
+        None,
+    )
+
+
+def get_tierlist_metadata(tierlist_ids: list[int], user_id: str | None = None):
+    if not tierlist_ids:
+        return {}
+
+    placeholders = ','.join('?' * len(tierlist_ids))
+
+    rating_result = db.q(
+        f"""
+        SELECT
+            tierlist_id,
+            SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as love_count,
+            SUM(CASE WHEN rating = -1 THEN 1 ELSE 0 END) as tomato_count
+        FROM tierlist_rating
+        WHERE tierlist_id IN ({placeholders})
+        GROUP BY tierlist_id
+        """,
+        tierlist_ids
+    )
+
+    comment_result = db.q(
+        f"""
+        SELECT tierlist_id, COUNT(*) as count
+        FROM tierlist_comment
+        WHERE tierlist_id IN ({placeholders})
+        GROUP BY tierlist_id
+        """,
+        tierlist_ids
+    )
+
+    result = {tid: {"love_count": 0, "tomato_count": 0, "user_rating": None, "comment_count": 0}
+              for tid in tierlist_ids}
+
+    for row in rating_result:
+        result[row["tierlist_id"]]["love_count"] = row["love_count"] or 0
+        result[row["tierlist_id"]]["tomato_count"] = row["tomato_count"] or 0
+
+    for row in comment_result:
+        result[row["tierlist_id"]]["comment_count"] = row["count"]
+
+    if user_id:
+        user_rating_result = db.q(
+            f"""
+            SELECT tierlist_id, rating
+            FROM tierlist_rating
+            WHERE tierlist_id IN ({placeholders}) AND user_id = ?
+            """,
+            [*tierlist_ids, user_id]
+        )
+        for row in user_rating_result:
+            result[row["tierlist_id"]]["user_rating"] = row["rating"]
+
+    return result
+
+
+def enrich_tierlists_with_ratings(tierlist_list: list[DBTierlist], user_id: str | None = None):
+    if not tierlist_list:
+        return tierlist_list
+
+    metadata = get_tierlist_metadata([tl.id for tl in tierlist_list], user_id)
+
+    for tierlist in tierlist_list:
+        data = metadata[tierlist.id]
+        tierlist.love_count = data["love_count"]
+        tierlist.tomato_count = data["tomato_count"]
+        tierlist.user_rating = data["user_rating"]
+        tierlist.comment_count = data["comment_count"]
+
+    return tierlist_list
+
+
+def get_rating_repr(rating: int) -> str:
+    if rating == 1:
+        return " ❤️"
+    if rating == -1:
+        return " 👎"
+    return ""
+
+
 # Router setup
 ar_tierlist = APIRouter(prefix="/tierlist")
 ar_tierlist.name = "Tierlist"
@@ -431,12 +520,11 @@ def make_container(element, can_edit, background_color="#f5f5f5"):
 
 # Routes
 @ar_tierlist.get("/new", name="Make new tierlist")
-def create_new_tierlist(htmx, request, session):
+def create_new_tierlist(htmx, req):
     from .images_router import category_input
     from .category_utils import get_all_categories
 
-    user_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+    is_admin = req.scope.get("is_admin", False)
     categories = get_all_categories()
 
     content = Div(
@@ -465,43 +553,46 @@ def create_new_tierlist(htmx, request, session):
 
 
 @ar_tierlist.post("/new")
-def post_new_tierlist(name: str, category: str, htmx, request, session):
+def post_new_tierlist(name: str, category: str, htmx, req):
     from .category_utils import validate_and_get_category
 
-    owner_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+    owner_id = req.scope["auth"]
+    is_admin = req.scope.get("is_admin", False)
 
     try:
         validated_category = validate_and_get_category(category)
     except ValueError as e:
-        return get_full_layout(P(f"Category error: {e}", style="color: red;"), htmx, is_admin)
+        return get_full_layout(
+            P(f"Category error: {e}", style="color: red;"), htmx, is_admin
+        )
 
-    tierlist = DBTierlist(
-        id=None,
+    tierlist = tierlists.insert(
         owner_id=owner_id,
         category=validated_category,
         name=name,
         data=json.dumps({tier: [] for tier in DBTierlist.TIERS}),
         created_at=datetime.now().isoformat(),
     )
-    tierlist = tierlists.insert(tierlist)
 
-    return get_tierlist_editor(tierlist.id, htmx, request, session)
+    return get_tierlist_editor(tierlist.id, htmx, req)
 
 
 @ar_tierlist.get("/id/{id}")
-def get_tierlist_editor(id: int, htmx, request, session):
+def get_tierlist_editor(id: int, htmx, req):
     from .images_router import get_accessible_images
 
+    logger.info(tierlists)
     tierlist = tierlists[id]
-    user_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+    is_admin = req.scope.get("is_admin", False)
+    user_id = req.scope["auth"]
 
     accessible_tierlists = get_accessible_tierlists(user_id, is_admin)
     if not any(tl.id == id for tl in accessible_tierlists):
         return get_full_layout(
-            H1("Access Denied"),
-            P("You don't have access to this tierlist."),
+            (
+                H1("Access Denied"),
+                P("You don't have access to this tierlist."),
+            ),
             htmx,
             is_admin,
         )
@@ -526,12 +617,9 @@ def get_tierlist_editor(id: int, htmx, request, session):
     ]
 
     images_query = get_accessible_images(user_id, is_admin, with_blobs=False)
-    logger.debug(f"Loaded {len(images_query)} images for tierlist")
-
     content = tierlist.render_page(
         images_query, can_edit, user_groups, shared_group_ids
     )
-    logger.info("Tierlist page rendered successfully")
 
     return get_full_layout(content, htmx, is_admin)
 
@@ -543,11 +631,10 @@ def save_tierlist(
     name: str,
     shared_groups: str,
     htmx,
-    request,
-    session,
+    req,
 ):
-    owner_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+    owner_id = req.scope["auth"]
+    is_admin = req.scope.get("is_admin", False)
     logger.debug(f"Saving tierlist. ID: {id}, Data: {tierlist_data}")
 
     tierlist = tierlists[id]
@@ -570,7 +657,7 @@ def save_tierlist(
                     {"tierlist_id": id, "user_group_id": int(group_id)}
                 )
 
-    main_content = get_tierlist_editor(id, htmx, request, session)
+    main_content = get_tierlist_editor(id, htmx, req)
     toast = Div(
         Ins("Saved successfully"),
         Script("""
@@ -588,9 +675,9 @@ def save_tierlist(
 
 
 @ar_tierlist.get("/list", name="Browse Tierlists")
-def list_tierlists(htmx, request, session, category: str = "", mine_only: str = ""):
-    user_id = session.get("user_id")
-    is_admin = request.scope.get("is_admin", False)
+def list_tierlists(htmx, req, category: str = "", mine_only: str = ""):
+    user_id = req.scope["auth"]
+    is_admin = req.scope.get("is_admin", False)
     tierlist_list = get_accessible_tierlists(user_id, is_admin)
 
     categories = sorted(set(tl.category for tl in tierlist_list if tl.category))
@@ -603,6 +690,8 @@ def list_tierlists(htmx, request, session, category: str = "", mine_only: str = 
     if mine_only == "true":
         filtered_tierlists = [tl for tl in filtered_tierlists if tl.owner_id == user_id]
 
+    enrich_tierlists_with_ratings(filtered_tierlists, user_id)
+
     content = DBTierlist.render_list(
         filtered_tierlists, user_id, categories, category, mine_only == "true"
     )
@@ -610,38 +699,20 @@ def list_tierlists(htmx, request, session, category: str = "", mine_only: str = 
 
 
 @ar_tierlist.delete("/id/{id}")
-def delete_tierlist(id: str, htmx, request, session):
-    owner_id = session.get("user_id")
+def delete_tierlist(id: str, htmx, req):
+    owner_id = req.scope["user_id"]
+    is_admin = req.scope.get("is_admin", False)
     tierlist = tierlists[id]
 
-    if tierlist.owner_id != owner_id:
+    if not is_admin and owner_id != tierlist.owner_id:
         logger.warning(
             f"User {owner_id} attempted to delete tierlist {id} owned by {tierlist.owner_id}"
         )
         return RedirectResponse("/unauthorized", status_code=303)
 
     tierlists.delete(id)
-    return list_tierlists(htmx, request, session)
 
-
-def get_rating_counts(tierlist_id: int):
-    love_count = db.q(
-        "SELECT COUNT(*) as count FROM tierlist_rating WHERE tierlist_id = ? AND rating = 1",
-        [tierlist_id],
-    )[0]["count"]
-    tomato_count = db.q(
-        "SELECT COUNT(*) as count FROM tierlist_rating WHERE tierlist_id = ? AND rating = -1",
-        [tierlist_id],
-    )[0]["count"]
-    return love_count, tomato_count
-
-
-def get_user_rating(tierlist_id: int, user_id: str):
-    result = db.q(
-        "SELECT rating FROM tierlist_rating WHERE tierlist_id = ? AND user_id = ?",
-        [tierlist_id, user_id],
-    )
-    return result[0]["rating"] if result else None
+    return list_tierlists(htmx, req)
 
 
 def rating_button(
@@ -657,60 +728,61 @@ def rating_button(
     )
 
 
-def get_comment_count(tierlist_id: int):
-    return db.q(
-        "SELECT COUNT(*) as count FROM tierlist_comment WHERE tierlist_id = ?",
-        [tierlist_id],
-    )[0]["count"]
-
-
-def rating_display(tierlist_id: int, user_id: str):
-    love_count, tomato_count = get_rating_counts(tierlist_id)
-    user_rating = get_user_rating(tierlist_id, user_id)
-    comment_count = get_comment_count(tierlist_id)
-
+def rating_display(tierlist: DBTierlist, user_id: str):
     return Div(
-        rating_button("👎", tomato_count, -1, tierlist_id, user_rating == -1),
-        rating_button("❤️", love_count, 1, tierlist_id, user_rating == 1),
+        rating_button(
+            emoji=get_rating_repr(-1),
+            count=tierlist.tomato_count,
+            rating_value=-1,
+            tierlist_id=tierlist.id,
+            is_active=(tierlist.user_rating == -1),
+        ),
+        rating_button(
+            emoji=get_rating_repr(1),
+            count=tierlist.love_count,
+            rating_value=1,
+            tierlist_id=tierlist.id,
+            is_active=(tierlist.user_rating == 1),
+        ),
         Button(
-            f"💬 {comment_count}",
-            hx_get=f"{ar_tierlist.prefix}/id/{tierlist_id}/comments",
-            hx_target=f"#comments-modal-{tierlist_id}",
+            f"💬 {tierlist.comment_count}",
+            hx_get=f"{ar_tierlist.prefix}/id/{tierlist.id}/comments",
+            hx_target=f"#comments-modal-{tierlist.id}",
             hx_swap="innerHTML",
-            onclick=f"document.getElementById('comments-modal-{tierlist_id}').showModal()",
+            onclick=f"document.getElementById('comments-modal-{tierlist.id}').showModal()",
             cls="rating-button outline secondary",
         ),
-        Dialog(id=f"comments-modal-{tierlist_id}", style="width: 600px;"),
-        id=f"ratings-{tierlist_id}",
+        Dialog(id=f"comments-modal-{tierlist.id}", style="width: 600px;"),
+        id=f"ratings-{tierlist.id}",
         cls="rating-container",
     )
 
 
 @ar_tierlist.post("/id/{id}/rate")
-def rate_tierlist(id: int, rating: int, session):
-    user_id = session.get("user_id")
+def rate_tierlist(id: int, rating: int, req):
+    user_id = req.scope["auth"]
 
     if rating not in [-1, 1]:
-        return rating_display(id, user_id)
+        tierlist = tierlists[id]
+        enrich_tierlists_with_ratings([tierlist], user_id)
+        return rating_display(tierlist, user_id)
 
-    existing = db.q(
-        "SELECT * FROM tierlist_rating WHERE tierlist_id = ? AND user_id = ?",
-        [id, user_id],
-    )
-
-    if existing:
-        existing_rating = TierlistRating(**existing[0])
-        if existing_rating.rating == rating:
-            tierlist_ratings.delete(existing_rating.id)
+    user_rating = get_user_rating(id, user_id)
+    if user_rating:
+        if user_rating.rating == rating:
+            tierlist_ratings.delete(user_rating.id)
         else:
-            existing_rating.rating = rating
-            tierlist_ratings.update(existing_rating)
+            user_rating.rating = rating
+            tierlist_ratings.update(user_rating)
     else:
         tierlist_ratings.insert(
             {"tierlist_id": id, "user_id": user_id, "rating": rating}
         )
 
-    return rating_display(id, user_id)
+    get_user_rating.cache_clear()
+    tierlist = tierlists[id]
+    enrich_tierlists_with_ratings([tierlist], user_id)
+    return rating_display(tierlist, user_id)
 
 
 def render_comment(comment: TierlistComment):
@@ -718,12 +790,7 @@ def render_comment(comment: TierlistComment):
 
     username, avatar_url = get_user_avatar(comment.user_id)
     user_rating = get_user_rating(comment.tierlist_id, comment.user_id)
-
-    vote_indicator = ""
-    if user_rating == 1:
-        vote_indicator = " ❤️"
-    elif user_rating == -1:
-        vote_indicator = " 👎"
+    vote_indicator = get_rating_repr(user_rating.rating) if user_rating else ""
 
     return Article(
         Div(
@@ -740,13 +807,10 @@ def render_comment(comment: TierlistComment):
 
 
 @ar_tierlist.get("/id/{id}/comments")
-def get_comments(id: int, session):
-    user_id = session.get("user_id")
-    comments = db.q(
-        "SELECT * FROM tierlist_comment WHERE tierlist_id = ? ORDER BY created_at DESC",
-        [id],
+def get_comments(id: int):
+    comment_list = tierlist_comments(
+        "tierlist_id = ?", (id,), order_by="created_at DESC"
     )
-    comment_list = [TierlistComment(**c) for c in comments]
 
     return Div(
         Article(
@@ -776,21 +840,22 @@ def get_comments(id: int, session):
 
 
 @ar_tierlist.post("/id/{id}/comments")
-def post_comment(id: int, comment: str, session):
-    user_id = session.get("user_id")
+def post_comment(id: int, comment: str, req):
+    user_id = req.scope["auth"]
 
     tierlist_comments.insert(
-        {
-            "tierlist_id": id,
-            "user_id": user_id,
-            "comment": comment,
-            "created_at": datetime.now().isoformat(),
-        }
+        tierlist_id=id,
+        user_id=user_id,
+        comment=comment,
+        created_at=datetime.now().isoformat(),
     )
 
-    return get_comments(id, session), Div(
-        rating_display(id, user_id),
-        **{"hx-swap-oob": f"true:#{f'ratings-{id}'}"},
+    tierlist = tierlists[id]
+    enrich_tierlists_with_ratings([tierlist], user_id)
+
+    return get_comments(id), Div(
+        rating_display(tierlist, user_id),
+        hx_swap_oob=f"true:#ratings-{id}",
     )
 
 
