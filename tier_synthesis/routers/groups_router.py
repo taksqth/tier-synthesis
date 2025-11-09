@@ -6,10 +6,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# DATABASE SETUP
+# ============================================================================
+
+db = database(os.environ.get("DB_PATH", "app/database.db"))
+
+
+# ============================================================================
+# ROUTER SETUP
+# ============================================================================
+
 ar_groups = APIRouter(prefix="/admin/groups")
 ar_groups.name = "Groups"
 
-db = database(os.environ.get("DB_PATH", "app/database.db"))
+
+# ============================================================================
+# MODELS
+# ============================================================================
 
 
 @dataclass
@@ -147,6 +162,11 @@ user_groups = db.create(
 )
 
 
+# ============================================================================
+# FEATURE: GROUP MANAGEMENT
+# ============================================================================
+
+
 @ar_groups.get("/list", name="Manage Groups")
 def list_groups(htmx, request):
     logger.info("Rendering user group management page")
@@ -174,6 +194,11 @@ def delete_group(group_id: str, htmx, request):
     logger.info(f"Deleting group {group_id}")
     user_groups.delete(group_id)
     return list_groups(htmx, request)
+
+
+# ============================================================================
+# FEATURE: GROUP MEMBERSHIP
+# ============================================================================
 
 
 @dataclass
@@ -260,5 +285,9 @@ def remove_user_from_group(membership_id: str, htmx, request):
     user_group_membership.delete(membership_id)
     return view_group(group_id, htmx, request)
 
+
+# ============================================================================
+# EXPORT
+# ============================================================================
 
 groups_router = ar_groups

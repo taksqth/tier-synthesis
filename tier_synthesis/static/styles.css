@@ -35,12 +35,23 @@ article a:hover {
     cursor: pointer;
 }
 
-/* Profile components */
+/* Avatar sizes */
 .avatar {
     width: 48px;
     height: 48px;
     border-radius: 50%;
     object-fit: cover;
+    flex-shrink: 0;
+}
+
+.avatar.small {
+    width: 24px;
+    height: 24px;
+}
+
+.avatar.large {
+    width: 80px;
+    height: 80px;
 }
 
 .profile-header {
@@ -129,25 +140,24 @@ article a:hover {
 .user-info {
     display: flex;
     align-items: center;
-    margin-bottom: 0.5em;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
-.user-info.large {
-    margin-bottom: 1em;
+.user-info.header {
+    gap: 1.5em;
+    margin-bottom: 1.5rem;
 }
 
-.user-info .avatar {
-    width: 24px;
-    height: 24px;
+.user-info small,
+.user-info strong {
+    margin: 0;
 }
 
-.user-info.large .avatar {
-    width: 32px;
-    height: 32px;
-}
-
-.user-info small {
-    margin-left: 0.5em;
+.user-info > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
 }
 
 /* Comments */

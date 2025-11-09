@@ -109,6 +109,19 @@ def users_share_group(user_id_1: str, user_id_2: str) -> bool:
     return result[0]["shared_count"] > 0 if result else False
 
 
+def get_shared_group_users(user_id):
+    result = db.q(
+        """
+        SELECT DISTINCT ugm2.user_id
+        FROM user_group_membership ugm1
+        JOIN user_group_membership ugm2 ON ugm1.group_id = ugm2.group_id
+        WHERE ugm1.user_id = ?
+        """,
+        [user_id],
+    )
+    return {row["user_id"] for row in result}
+
+
 ar_users = APIRouter(prefix="/admin/users")
 ar_users.name = "Users"
 

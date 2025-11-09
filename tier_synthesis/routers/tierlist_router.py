@@ -135,6 +135,11 @@ def get_accessible_tierlists(
     return [DBTierlist(**row) for row in result]
 
 
+def get_category_tierlists(category, user_id, is_admin):
+    tierlists = get_accessible_tierlists(user_id, is_admin, fetch_all=True)
+    return [tl for tl in tierlists if tl.category == category]
+
+
 @lru_cache(maxsize=256)
 def get_user_rating(tierlist_id: int, user_id: str) -> TierlistRating | None:
     return next(
@@ -376,12 +381,30 @@ def render_tierlist_page(
     can_edit: bool = True,
     user_groups: list[dict] | None = None,
     shared_group_ids: list[int] | None = None,
+    viewer_id: str | None = None,
 ) -> Any:
-    from .users_router import get_user_avatar
+    from .users_router import get_user_avatar, users_share_group
 
     filtered_images = [img for img in images if img.category == tierlist.category]
     tier_structure, leftover_images = tierlist.get_tier_structure(filtered_images)
     username, avatar_url = get_user_avatar(tierlist.owner_id)
+
+    can_view_profile = viewer_id and users_share_group(viewer_id, tierlist.owner_id)
+
+    user_display = (
+        fh.A(
+            fh.Img(src=avatar_url, alt="avatar", cls="avatar"),
+            fh.Strong(username),
+            href=f"/profiles/id/{tierlist.owner_id}",
+            hx_boost="true",
+            hx_target="#main",
+        )
+        if can_view_profile
+        else fh.Div(
+            fh.Img(src=avatar_url, alt="avatar", cls="avatar"),
+            fh.Strong(username),
+        )
+    )
 
     return fh.Div(
         fh.Header(
@@ -397,13 +420,8 @@ def render_tierlist_page(
             cls="flex-row",
         ),
         fh.Div(
-            fh.Img(
-                src=avatar_url,
-                alt="avatar",
-                cls="avatar",
-            ),
-            fh.Strong(username),
-            cls="user-info large",
+            user_display,
+            cls="user-info header",
         ),
         render_save_form(tierlist, can_edit, user_groups or [], shared_group_ids or []),
         fh.P("Category: ", tag(tierlist.category)),
@@ -515,7 +533,7 @@ def render_tierlist_list(
                             fh.Img(
                                 src=get_user_avatar(tierlist.owner_id)[1],
                                 alt="avatar",
-                                cls="avatar",
+                                cls="avatar small",
                             ),
                             fh.Small(get_user_avatar(tierlist.owner_id)[0]),
                             cls="user-info",
@@ -648,7 +666,7 @@ def get_tierlist_editor(id: int, htmx, req) -> Any:
 
     images_query = get_accessible_images(user_id, is_admin, with_blobs=False)
     content = render_tierlist_page(
-        tierlist, images_query, can_edit, user_groups, shared_group_ids
+        tierlist, images_query, can_edit, user_groups, shared_group_ids, user_id
     )
 
     return get_full_layout(content, htmx, is_admin)

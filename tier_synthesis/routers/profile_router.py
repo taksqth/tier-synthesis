@@ -14,7 +14,17 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# DATABASE SETUP
+# ============================================================================
+
 db = database(os.environ.get("DB_PATH", "app/database.db"))
+
+
+# ============================================================================
+# ROUTER SETUP
+# ============================================================================
 
 ar_profile = APIRouter(prefix="/profiles")
 ar_profile.name = "Profiles"
@@ -22,7 +32,7 @@ ar_profile.show = True
 
 
 # ============================================================================
-# DATA ANALYSIS FUNCTIONS
+# DATA ACCESS LAYER
 # ============================================================================
 
 
@@ -73,6 +83,11 @@ def get_user_stats(user_id: str) -> dict:
         "ratings_received": ratings_received,
         "comments_received": comments_received,
     }
+
+
+# ============================================================================
+# DATA ANALYSIS FUNCTIONS
+# ============================================================================
 
 
 def calculate_opinion_divergence(user_id: str, category: str) -> list[dict]:
@@ -170,21 +185,18 @@ def get_taste_profile_summary(user_id: str) -> dict:
 def render_stat_card(title: str, value: str, subtitle: str = "") -> Any:
     """Render a single stat card."""
     return Article(
-        H3(value, style="margin: 0; font-size: 2em;"),
-        P(title, style="margin: 0.5em 0 0 0; font-weight: 600;"),
-        (Small(subtitle, style="color: var(--muted-color);") if subtitle else None),
-        style="text-align: center; padding: 1.5em;",
+        H3(value),
+        P(Strong(title)),
+        (Small(subtitle) if subtitle else None),
+        align="center",
     )
 
 
 def render_badge(badge: dict) -> Any:
     """Render a user badge."""
     return Article(
-        Div(
-            H4(badge["title"], style="margin: 0;"),
-            P(badge["description"], style="margin: 0.5em 0 0 0; font-size: 0.9em;"),
-        ),
-        style="padding: 1em;",
+        H4(badge["title"]),
+        P(badge["description"]),
     )
 
 
@@ -212,18 +224,16 @@ def render_divergent_image(div: dict, images_map: dict) -> Any:
             hx_boost="true",
             hx_target="#main",
         ),
-        P(image.name, style="margin: 0.5em 0; font-weight: 600;"),
+        P(Strong(image.name)),
         tag(div["category"]),
         Div(
             P(
                 f"{arrow} You: ",
                 Strong(user_tier),
                 f" | Everyone: {avg_tier}",
-                style="margin: 0.5em 0; font-size: 0.9em;",
             ),
-            Small(label, style="color: var(--muted-color);"),
+            Small(label),
         ),
-        style="padding: 1em;",
     )
 
 
@@ -246,9 +256,7 @@ def render_recent_tierlists(tierlists: list, user_id: str) -> Any:
                     href=f"/tierlist/id/{tl.id}",
                     hx_boost="true",
                     hx_target="#main",
-                    style="text-decoration: none;",
                 ),
-                style="padding: 1em;",
             )
             for tl in tierlists[:5]
         ]
@@ -265,18 +273,13 @@ def render_category_insights(category_profiles: list, user_id: str) -> Any:
             Article(
                 A(
                     Div(
-                        H4(prof["category"], style="margin: 0;"),
-                        P(
-                            f"{prof['tierlist_count']} tierlists",
-                            style="margin: 0.5em 0 0 0; color: var(--muted-color);",
-                        ),
+                        H4(prof["category"]),
+                        Small(f"{prof['tierlist_count']} tierlists"),
                     ),
                     href=f"/insights/analyze?category={prof['category']}",
                     hx_boost="true",
                     hx_target="#main",
-                    style="text-decoration: none;",
                 ),
-                style="padding: 1em;",
             )
             for prof in category_profiles
         ],
@@ -365,25 +368,21 @@ def render_profile_page(
             cls="flex-row",
         ),
         # User info
-        Article(
-            Div(
-                Img(
-                    src=avatar_url,
-                    alt="avatar",
-                    style="width: 80px; height: 80px; border-radius: 50%;",
-                ),
-                Div(
-                    H2(username, style="margin: 0;"),
-                    P(
-                        f"Member since {stats.get('member_since', 'recently')}",
-                        style="margin: 0.5em 0 0 0; color: var(--muted-color);",
-                    )
-                    if stats.get("member_since")
-                    else None,
-                ),
-                style="display: flex; gap: 1.5em; align-items: center;",
+        Div(
+            Img(
+                src=avatar_url,
+                alt="avatar",
+                cls="avatar large",
             ),
-            style="padding: 1.5em;",
+            Div(
+                H2(username),
+                (
+                    Small(f"Member since {stats.get('member_since', 'recently')}")
+                    if stats.get("member_since")
+                    else None
+                ),
+            ),
+            cls="user-info header",
         ),
         # Stats
         H3("Statistics"),
@@ -409,13 +408,12 @@ def render_profile_page(
                                 if tier_distribution
                                 else 1,
                             ),
-                            style="margin-bottom: 0.5em;",
                         )
                         for tier in ["S", "A", "B", "C", "D"]
                         if tier_distribution[tier] > 0
                     ],
                 ),
-                style="margin-top: 1em;",
+                cls="mt-2",
             )
             if tier_distribution
             else None

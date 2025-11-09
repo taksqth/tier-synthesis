@@ -1,4 +1,4 @@
-from fasthtml.common import database
+from fasthtml import common as fh
 from dataclasses import dataclass
 import os
 
@@ -9,7 +9,7 @@ class Category:
     normalized: str
 
 
-db = database(os.environ.get("DB_PATH", "app/database.db"))
+db = fh.database(os.environ.get("DB_PATH", "app/database.db"))
 categories = db.create(Category, pk="normalized", transform=True)
 
 
@@ -30,7 +30,7 @@ def validate_and_get_category(category_name: str):
                 f"Category already exists as '{existing.name}' (case-sensitive)"
             )
         return existing.name
-    except NotFoundError:
+    except fh.NotFoundError:
         categories.insert(Category(name=category_name, normalized=normalized))
         return category_name
 
