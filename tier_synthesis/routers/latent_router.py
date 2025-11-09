@@ -38,7 +38,7 @@ def get_shared_group_users(user_id):
         JOIN user_group_membership ugm2 ON ugm1.group_id = ugm2.group_id
         WHERE ugm1.user_id = ?
         """,
-        [user_id]
+        [user_id],
     )
     return {row["user_id"] for row in result}
 
@@ -76,7 +76,9 @@ def build_ratings_matrix(category, user_id, is_admin):
                 has_ratings = True
 
         if has_ratings:
-            shares_group = tierlist.owner_id in shared_users or tierlist.owner_id == user_id
+            shares_group = (
+                tierlist.owner_id in shared_users or tierlist.owner_id == user_id
+            )
             tierlist_labels.append((tierlist.owner_id, tierlist.name, shares_group))
             ratings_list.append(rating_vector)
 
@@ -106,17 +108,19 @@ def get_user_avatars_map(owner_ids):
     if not unique_ids:
         return {}
 
-    placeholders = ','.join(['?'] * len(unique_ids))
+    placeholders = ",".join(["?"] * len(unique_ids))
     users_data = db.q(
         f"SELECT id, username, avatar FROM user WHERE id IN ({placeholders})",
-        unique_ids
+        unique_ids,
     )
 
     result = {}
     for user in users_data:
         avatar_hash = user.get("avatar")
         if avatar_hash:
-            result[user["id"]] = f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar_hash}.png?size=128"
+            result[user["id"]] = (
+                f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar_hash}.png?size=128"
+            )
         else:
             result[user["id"]] = DEFAULT_AVATAR
 
@@ -283,7 +287,11 @@ def render_your_profiles_section(
         for i in shown_indices
     ]
 
-    title = f"Your Taste Profile ({len(shown_indices)} of {total})" if total > 5 else "Your Taste Profile"
+    title = (
+        f"Your Taste Profile ({len(shown_indices)} of {total})"
+        if total > 5
+        else "Your Taste Profile"
+    )
 
     return Div(
         H2(title),
@@ -346,12 +354,17 @@ def select_category(htmx, request, session):
     categories = get_all_categories()
 
     if is_admin:
-        img_counts = {row['category']: row['count'] for row in db.q(
-            "SELECT category, COUNT(*) as count FROM db_image WHERE category IS NOT NULL GROUP BY category"
-        )}
+        img_counts = {
+            row["category"]: row["count"]
+            for row in db.q(
+                "SELECT category, COUNT(*) as count FROM db_image WHERE category IS NOT NULL GROUP BY category"
+            )
+        }
     else:
-        img_counts = {row['category']: row['count'] for row in db.q(
-            """
+        img_counts = {
+            row["category"]: row["count"]
+            for row in db.q(
+                """
             SELECT i.category, COUNT(DISTINCT i.id) as count
             FROM db_image i
             LEFT JOIN image_share s ON i.id = s.image_id
@@ -359,8 +372,9 @@ def select_category(htmx, request, session):
             WHERE (i.owner_id = ? OR m.user_id = ?) AND i.category IS NOT NULL
             GROUP BY i.category
             """,
-            [user_id, user_id]
-        )}
+                [user_id, user_id],
+            )
+        }
 
     category_cards = []
     for cat in categories:

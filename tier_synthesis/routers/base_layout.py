@@ -18,7 +18,6 @@ def get_named_routes(api_router):
 
 
 def get_header(is_admin=False):
-
     def create_nav_link(title, page_path):
         return A(title, href=page_path, hx_boost="true", hx_target="#main")
 

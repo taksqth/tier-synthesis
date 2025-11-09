@@ -87,13 +87,15 @@ def can_access_image(image_id: int, user_id: str, is_admin: bool):
         WHERE i.id = ? AND (i.owner_id = ? OR m.user_id = ?)
         LIMIT 1
         """,
-        [image_id, user_id, user_id]
+        [image_id, user_id, user_id],
     )
     return len(result) > 0
 
 
 def get_accessible_images(user_id: str, is_admin: bool, with_blobs: bool = True):
-    cols = "*" if with_blobs else "id, owner_id, name, category, content_type, created_at"
+    cols = (
+        "*" if with_blobs else "id, owner_id, name, category, content_type, created_at"
+    )
 
     if is_admin:
         result = db.q(f"SELECT {cols} FROM db_image ORDER BY created_at DESC")
@@ -114,16 +116,19 @@ def get_accessible_images(user_id: str, is_admin: bool, with_blobs: bool = True)
     if with_blobs:
         return [DBImage(**row) for row in result]
 
-    return [DBImage(
-        id=row["id"],
-        owner_id=row["owner_id"],
-        name=row["name"],
-        category=row["category"],
-        image_data=b"",
-        thumbnail_data=b"",
-        content_type=row["content_type"],
-        created_at=row["created_at"]
-    ) for row in result]
+    return [
+        DBImage(
+            id=row["id"],
+            owner_id=row["owner_id"],
+            name=row["name"],
+            category=row["category"],
+            image_data=b"",
+            thumbnail_data=b"",
+            content_type=row["content_type"],
+            created_at=row["created_at"],
+        )
+        for row in result
+    ]
 
 
 # Utility and component functions
@@ -238,8 +243,8 @@ def serve_thumbnail(id: int, session, request):
         media_type=image.content_type,
         headers={
             "Cache-Control": "private, max-age=3600",
-            "ETag": f'"{id}-{hash(image.created_at)}"'
-        }
+            "ETag": f'"{id}-{hash(image.created_at)}"',
+        },
     )
 
 
@@ -394,7 +399,9 @@ async def post_image_edit_form(
     try:
         validated_category = validate_and_get_category(category)
     except ValueError as e:
-        return get_full_layout(P(f"Category error: {e}", cls="error-text"), htmx, is_admin)
+        return get_full_layout(
+            P(f"Category error: {e}", cls="error-text"), htmx, is_admin
+        )
 
     image.name = name
     image.category = validated_category
@@ -519,15 +526,13 @@ async def post_image_upload_form(
         thumbnail_data = process_image(image_data)
 
         valid_images.append(
-            DBImage(
-                owner_id=owner_id,
-                name=f"Image_{uuid.uuid4().hex[:8]}",
-                image_data=image_data,
-                thumbnail_data=thumbnail_data,
-                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                content_type=image.content_type,
-                category=validated_category,
-            )
+            owner_id=owner_id,
+            name=f"Image_{uuid.uuid4().hex[:8]}",
+            image_data=image_data,
+            thumbnail_data=thumbnail_data,
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            content_type=image.content_type,
+            category=validated_category,
         )
 
     images_to_insert = [images.insert(image) for image in valid_images]
@@ -597,6 +602,7 @@ def get_image_gallery(htmx, request, session, category: str = "", mine_only: str
 @ar_images.get("/categories")
 def get_categories(request, session):
     from .category_utils import get_all_categories
+
     return get_all_categories()
 
 

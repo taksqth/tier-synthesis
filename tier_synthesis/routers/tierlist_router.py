@@ -250,9 +250,7 @@ def make_draggable(element: Any) -> Any:
     )
 
 
-def make_container(
-    element: Any, can_edit: bool, background_color: str = "#f5f5f5"
-) -> Any:
+def make_container(element: Any, can_edit: bool) -> Any:
     return element(
         **{
             "x-on:dragover": "$event.preventDefault()",
@@ -274,18 +272,14 @@ def make_container(
         + f"""
             grid-template-columns: repeat(auto-fill, 130px);
             min-height: 120px;
-            background-color: {background_color};
-            border: 2px dashed #ccc;
-            border-radius: 8px;
             padding: 1rem;
-            margin: 0.1rem 0;
+            margin: 0.5rem 0;
+            background-color: var(--pico-secondary-background);
         """,
     )
 
 
 def render_draggable_image(image: Any, can_edit: bool) -> Any:
-    # Each image triggers a separate HTTP request to /images/thumbnail/{id}
-    # This is a lazy-loading approach suitable for CDN
     element = fh.Div(
         fh.Img(
             src=f"/images/thumbnail/{image.id}",
@@ -808,7 +802,7 @@ def rating_display(tierlist: DBTierlist) -> Any:
 
 
 @ar_tierlist.post("/id/{id}/rate")
-def rate_tierlist(id: int, rating: int, req: Any) -> Any:
+def rate_tierlist(id: int, rating: int, req) -> Any:
     user_id = req.scope["auth"]
 
     if rating not in [-1, 1]:
@@ -816,7 +810,7 @@ def rate_tierlist(id: int, rating: int, req: Any) -> Any:
         enrich_tierlists_with_ratings([tierlist], user_id)
         return rating_display(tierlist)
 
-    user_rating = get_user_rating(id)
+    user_rating = get_user_rating(id, user_id)
     if user_rating:
         if user_rating.rating == rating:
             tierlist_ratings.delete(user_rating.id)
@@ -825,7 +819,9 @@ def rate_tierlist(id: int, rating: int, req: Any) -> Any:
             tierlist_ratings.update(user_rating)
     else:
         tierlist_ratings.insert(
-            {"tierlist_id": id, "user_id": user_id, "rating": rating}
+            tierlist_id=id,
+            user_id=user_id,
+            rating=rating,
         )
 
     get_user_rating.cache_clear()
