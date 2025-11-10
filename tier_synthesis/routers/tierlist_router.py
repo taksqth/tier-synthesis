@@ -1,5 +1,6 @@
 from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout, list_item, tag
+from components.modal import Modal, modal_open_handler, ModalCloseButton
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
@@ -272,32 +273,16 @@ ar_tierlist.show = True  # type: ignore
 
 def make_draggable(element: Any) -> Any:
     return element(
-        **{
-            "x-on:dragstart": "dragging = $el",
-            "x-on:dragend": "dragging = null",
-        },
         draggable="true",
+        **{
+            "@dragstart": "dragging = $el",
+            "@dragend": "dragging = null",
+        },
     )
 
 
 def make_container(element: Any, can_edit: bool) -> Any:
     return element(
-        **{
-            "x-on:dragover": "$event.preventDefault()",
-            "x-on:drop": """
-                $event.preventDefault();
-                const target = $event.target.closest('article');
-                if (dragging && target) {
-                    target.parentNode.insertBefore(dragging, target);
-                    hasUnsavedChanges = true;
-                } else if (dragging) {
-                    $event.currentTarget.insertBefore(dragging, $event.currentTarget.firstChild);
-                    hasUnsavedChanges = true;
-                }
-            """
-            if can_edit
-            else "",
-        },
         style=(element.style if element.style else "")
         + f"""
             grid-template-columns: repeat(auto-fill, 130px);
@@ -306,6 +291,22 @@ def make_container(element: Any, can_edit: bool) -> Any:
             margin: 0.5rem 0;
             background-color: var(--pico-secondary-background);
         """,
+        **{
+            "@dragover": "$event.preventDefault()",
+            "@drop": """
+                    $event.preventDefault();
+                    const target = $event.target.closest('article');
+                    if (dragging && target) {
+                        target.parentNode.insertBefore(dragging, target);
+                        hasUnsavedChanges = true;
+                    } else if (dragging) {
+                        $event.currentTarget.insertBefore(dragging, $event.currentTarget.firstChild);
+                        hasUnsavedChanges = true;
+                    }
+             """
+            if can_edit
+            else "",
+        },
     )
 
 
@@ -358,7 +359,7 @@ def SaveForm(
                     placeholder="My Tierlist",
                     id="tierlist-name-input",
                     readonly=not can_edit,
-                    **{"@input": "hasUnsavedChanges = true"} if can_edit else {},  # type: ignore
+                    _at_input="hasUnsavedChanges = true" if can_edit else None,
                 ),
                 Button(
                     "Save",
@@ -373,13 +374,11 @@ def SaveForm(
                     cls="primary",
                     id="tierlist-save-btn",
                     disabled=not can_edit,
-                    **{
-                        "x-bind:aria-busy": "saving",
-                        "@htmx:before-request": "saving = true; hasUnsavedChanges = false",
-                        "@htmx:after-request": "saving = false",
-                    }
+                    x_bind__aria_busy="saving" if can_edit else None,
+                    _at_htmx__before_request="saving = true; hasUnsavedChanges = false"
                     if can_edit
-                    else {},  # type: ignore
+                    else None,
+                    _at_htmx__after_request="saving = false" if can_edit else None,  # type: ignore
                 ),
                 cls="flex-row",
             ),
@@ -394,7 +393,7 @@ def SaveForm(
                         checked=group["id"] in shared_group_ids,
                         disabled=not can_edit,
                         label=group["groupname"],
-                        **{"@input": "hasUnsavedChanges = true"} if can_edit else {},
+                        _at_input="hasUnsavedChanges = true" if can_edit else None,
                     )
                     for group in user_groups
                 ],
@@ -478,7 +477,7 @@ def TierlistPage(
                 });
             })();
         """),
-        **{"x-data": "{ dragging: null, saving: false, hasUnsavedChanges: false }"},  # type: ignore
+        x_data="{ dragging: null, saving: false, hasUnsavedChanges: false }",
     )
 
 
@@ -604,17 +603,16 @@ def create_new_tierlist(htmx, req) -> Any:
             ),
             hx_post=f"{ar_tierlist.prefix}/new",
             hx_target="#main",
-            hx_push_url="true",
         ),
     )
     return get_full_layout(content, htmx, is_admin)
 
 
 @ar_tierlist.post("/new")
-def post_new_tierlist(name: str, category: str, htmx, req) -> Any:
+def post_new_tierlist(name: str, category: str, htmx, auth, req) -> Any:
     from .category_utils import validate_and_get_category
 
-    owner_id = req.scope["auth"]
+    owner_id = auth
     is_admin = req.scope.get("is_admin", False)
 
     try:
@@ -689,9 +687,10 @@ def save_tierlist(
     name: str,
     shared_groups: str,
     htmx,
+    auth,
     req,
 ) -> Any:
-    owner_id = req.scope["auth"]
+    owner_id = auth
     is_admin = req.scope.get("is_admin", False)
     logger.debug(f"Saving tierlist. ID: {id}, Data: {tierlist_data}")
 
@@ -757,8 +756,8 @@ def list_tierlists(htmx, req, category: str = "", mine_only: str = "") -> Any:
 
 
 @ar_tierlist.delete("/id/{id}")
-def delete_tierlist(id: str, htmx, req) -> Any:
-    owner_id = req.scope["auth"]
+def delete_tierlist(id: str, htmx, auth, req) -> Any:
+    owner_id = auth
     is_admin = req.scope.get("is_admin", False)
     tierlist = tierlists[id]
 
@@ -799,7 +798,7 @@ def rating_button(
     )
 
 
-def rating_display(tierlist: DBTierlist) -> Any:
+def rating_display(tierlist: DBTierlist, **kwargs) -> Any:
     return Div(
         rating_button(
             emoji=get_rating_repr(-1),
@@ -820,18 +819,25 @@ def rating_display(tierlist: DBTierlist) -> Any:
             hx_get=f"{ar_tierlist.prefix}/id/{tierlist.id}/comments",
             hx_target=f"#comments-modal-{tierlist.id}",
             hx_swap="innerHTML",
-            onclick=f"document.getElementById('comments-modal-{tierlist.id}').showModal()",
+            _at_click=modal_open_handler(f"commentsModal{tierlist.id}"),
             cls="rating-button outline secondary",
         ),
-        Dialog(id=f"comments-modal-{tierlist.id}", style="width: 600px;"),
+        Modal(
+            "",
+            ref_name=f"commentsModal{tierlist.id}",
+            modal_id=f"comments-modal-{tierlist.id}",
+            style="width: 600px;",
+        ),
         id=f"ratings-{tierlist.id}",
         cls="rating-container",
+        x_data="{}",
+        **kwargs,
     )
 
 
 @ar_tierlist.post("/id/{id}/rate")
-def rate_tierlist(id: int, rating: int, req) -> Any:
-    user_id = req.scope["auth"]
+def rate_tierlist(id: int, rating: int, auth) -> Any:
+    user_id = auth
 
     if rating not in [-1, 1]:
         tierlist = tierlists[id]
@@ -890,36 +896,41 @@ def get_comments(id: int) -> Any:
         "tierlist_id = ?", (id,), order_by="created_at DESC"
     )
 
-    return Div(
-        Article(
+    return Article(
+        Header(
+            ModalCloseButton(f"commentsModal{id}"),
             H3("Comments"),
-            Div(
-                *[Comment(c) for c in comment_list]
-                if comment_list
-                else [P("No comments yet")],
-                cls="comments-list",
-            ),
-            Form(
-                Fieldset(
-                    Textarea(
-                        name="comment",
-                        placeholder="Write a comment...",
-                        required=True,
-                        rows="3",
-                    ),
-                    Button("Post Comment", type="submit"),
+        ),
+        Div(
+            *[Comment(c) for c in comment_list]
+            if comment_list
+            else [P("No comments yet")],
+            cls="comments-list",
+        ),
+        Form(
+            Fieldset(
+                Textarea(
+                    name="comment",
+                    placeholder="Write a comment...",
+                    required=True,
+                    rows="3",
                 ),
-                hx_post=f"{ar_tierlist.prefix}/id/{id}/comments",
-                hx_target=f"#comments-modal-{id}",
-                hx_swap="innerHTML",
+                Button(
+                    "Post Comment",
+                    type="submit",
+                    _at_click=f"$refs.commentsModal{id}.close(); document.documentElement.classList.remove('modal-is-open', 'modal-is-opening', 'modal-is-closing')",
+                ),
             ),
+            hx_post=f"{ar_tierlist.prefix}/id/{id}/comments",
+            hx_target=f"#comments-modal-{id}",
+            hx_swap="innerHTML",
         ),
     )
 
 
 @ar_tierlist.post("/id/{id}/comments")
-def post_comment(id: int, comment: str, req: Any) -> tuple[Any, Any]:
-    user_id = req.scope["auth"]
+def post_comment(id: int, comment: str, auth) -> Any:
+    user_id = auth
 
     tierlist_comments.insert(
         tierlist_id=id,
@@ -931,9 +942,9 @@ def post_comment(id: int, comment: str, req: Any) -> tuple[Any, Any]:
     tierlist = tierlists[id]
     enrich_tierlists_with_ratings([tierlist], user_id)
 
-    return get_comments(id), Div(
-        rating_display(tierlist),
-        hx_swap_oob=f"true:#ratings-{id}",
+    return (
+        get_comments(id),
+        rating_display(tierlist, hx_swap_oob=f"true:#ratings-{id}"),
     )
 
 

@@ -1,5 +1,6 @@
 from fasthtml.common import *  # type: ignore
 from .base_layout import get_full_layout, list_item
+from components.modal import Modal, ModalOpenButton, ModalCloseButton
 from dataclasses import dataclass
 import os
 import logging
@@ -41,21 +42,13 @@ class UserGroup:
         return Div(
             Header(
                 H1("Group Management"),
-                Button(
-                    "Create Group",
-                    cls="primary",
-                    **{"@click": "$refs.createGroupModal.showModal()"},  # type: ignore
-                ),
+                ModalOpenButton("Create Group", "createGroupModal", cls="primary"),
                 cls="flex-row",
             ),
-            Dialog(
+            Modal(
                 Article(
                     Header(
-                        Button(
-                            aria_label="Close",
-                            rel="prev",
-                            **{"@click": "$refs.createGroupModal.close()"},  # type: ignore
-                        ),
+                        ModalCloseButton("createGroupModal"),
                         P(Strong("Create New Group")),
                     ),
                     Form(
@@ -73,13 +66,12 @@ class UserGroup:
                                 type="submit",
                                 hx_post=f"{ar_groups.prefix}/new",
                                 hx_target="#main",
-                                hx_push_url="true",
+                                _at_click="$refs.createGroupModal.close(); document.documentElement.classList.remove('modal-is-open', 'modal-is-opening', 'modal-is-closing')",
                             ),
                         ),
-                        **{"@submit": "$refs.createGroupModal.close()"},
                     ),
                 ),
-                **{"x-ref": "createGroupModal"},  # type: ignore
+                ref_name="createGroupModal",
             ),
             *[
                 list_item(
@@ -100,7 +92,7 @@ class UserGroup:
                 )
                 for group in group_list
             ],
-            **{"x-data": "{}"},  # type: ignore
+            x_data="{}",
         )
 
     @staticmethod
@@ -110,24 +102,20 @@ class UserGroup:
         return Div(
             Header(
                 H1(f"{group.groupname}"),
-                Button(
+                ModalOpenButton(
                     "Add Member",
+                    "addMemberModal",
                     cls="primary",
-                    **{"@click": "$refs.addMemberModal.showModal()"},  # type: ignore
                     hx_get=f"{ar_groups.prefix}/id/{group.id}/member-options",
                     hx_trigger="click",
                     hx_target="#member-select-container",
                 ),
                 cls="flex-row",
             ),
-            Dialog(
+            Modal(
                 Article(
                     Header(
-                        Button(
-                            aria_label="Close",
-                            rel="prev",
-                            **{"@click": "$refs.addMemberModal.close()"},  # type: ignore
-                        ),
+                        ModalCloseButton("addMemberModal"),
                         P(Strong("Add Member to Group")),
                     ),
                     Form(
@@ -138,20 +126,19 @@ class UserGroup:
                                 type="submit",
                                 hx_post=f"{ar_groups.prefix}/id/{group.id}/add-member",
                                 hx_target="#main",
-                                hx_push_url="true",
+                                _at_click="$refs.addMemberModal.close(); document.documentElement.classList.remove('modal-is-open', 'modal-is-opening', 'modal-is-closing')",
                             ),
                         ),
-                        **{"@submit": "$refs.addMemberModal.close()"},
                     ),
                 ),
-                **{"x-ref": "addMemberModal"},  # type: ignore
+                ref_name="addMemberModal",
             ),
             Hr(),
             Section(
                 UserGroupMembership.render_user_table_for_group(group.id),
                 id="members-list",
             ),
-            **{"x-data": "{}"},  # type: ignore
+            x_data="{}",
         )
 
 

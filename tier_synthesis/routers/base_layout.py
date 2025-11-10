@@ -90,10 +90,14 @@ def get_full_layout(content, htmx, is_admin=False):
                     if (window._globalHandlersRegistered) return;
                     window._globalHandlersRegistered = true;
 
-                    htmx.on('htmx:beforeSwap', function() {
+                    htmx.on('htmx:beforeSwap', function(event) {
                         document.querySelectorAll('details[open]').forEach(details => {
                             details.removeAttribute('open');
                         });
+
+                        if (event.detail.target.id === 'main') {
+                            document.documentElement.classList.remove('modal-is-open', 'modal-is-opening', 'modal-is-closing');
+                        }
                     });
 
                     document.addEventListener('click', function(event) {
@@ -101,6 +105,12 @@ def get_full_layout(content, htmx, is_admin=False):
                             event.target.close();
                         }
                     });
+
+                    document.addEventListener('close', function(event) {
+                        if (event.target.tagName === 'DIALOG') {
+                            document.documentElement.classList.remove('modal-is-open', 'modal-is-opening', 'modal-is-closing');
+                        }
+                    }, true);
                 })();
             """),
         )

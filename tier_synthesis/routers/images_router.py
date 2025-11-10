@@ -7,6 +7,7 @@ from PIL import Image
 from dataclasses import dataclass
 from .base_layout import get_full_layout, tag
 from services.storage import get_storage_service
+from components.image_cropper import ImageCropperJS, CroppableImageInput
 import logging
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,8 @@ def ImageEditPage(
     from components.user_display import UserDisplay
 
     storage = get_storage_service()
-    full_image_url = storage.generate_signed_url(image.full_image_path)
+    full_image_url = storage.generate_signed_url(image.full_image_path, cache_bust=True)
+    thumbnail_url = storage.generate_signed_url(image.thumbnail_path, cache_bust=True)
 
     return (
         Header(
@@ -242,10 +244,44 @@ def ImageEditPage(
             UserDisplay(image.owner_id, viewer_id),
             cls="user-info header",
         ),
-        Img(
-            src=full_image_url,
-            alt=image.name,
-            style="max-width: 200px; display: block; margin: 0 auto;",
+        Article(
+            H3("Current Images"),
+            Grid(
+                Article(
+                    Header("Full Image"),
+                    Img(
+                        src=full_image_url,
+                        alt=image.name,
+                        style="max-width: 200px; display: block;",
+                    ),
+                ),
+                Article(
+                    Header("Thumbnail (256x256)"),
+                    Img(
+                        src=thumbnail_url,
+                        alt=f"{image.name} thumbnail",
+                        style="width: 256px; height: 256px; display: block;",
+                        id=f"thumbnail-display-{image.id}",
+                    ),
+                    (
+                        Form(
+                            CroppableImageInput(
+                                name="thumbnail_crop",
+                                preview_id=f"thumbnail-crop-preview-{image.id}",
+                                cropped_input_id=f"thumbnail-cropped-{image.id}",
+                                current_image_url=full_image_url,
+                            ),
+                            enctype="multipart/form-data",
+                            hx_post=f"{ar_images.prefix}/id/{image.id}/thumbnail",
+                            hx_target=f"#thumbnail-display-{image.id}",
+                            hx_swap="outerHTML",
+                        )
+                        if can_edit
+                        else None
+                    ),
+                ),
+                style="display: flex; gap: 2rem; justify-content: center; align-items: start;",
+            ),
         ),
         Form(
             Fieldset(
@@ -260,13 +296,15 @@ def ImageEditPage(
                     ),
                 ),
                 Label(
-                    "Change image",
+                    "Change image (upload new)",
                     Input(
                         type="file",
                         name="new_uploaded_image",
                         accept="image/*",
                     ),
-                ),
+                )
+                if can_edit
+                else None,
                 category_input(categories, value=image.category, readonly=not can_edit),
                 (
                     Label(
@@ -285,7 +323,7 @@ def ImageEditPage(
                     if user_groups
                     else None
                 ),
-                Button("Submit") if can_edit else None,
+                Button("Save Changes") if can_edit else None,
             ),
             enctype="multipart/form-data",
             hx_post=f"{ar_images.prefix}/id/{image.id}",
@@ -401,7 +439,7 @@ def process_image(img_data):
     top = (height - crop_size) * 2 // 10
     img = img.crop((left, top, left + crop_size, top + crop_size))
 
-    img.thumbnail((128, 128), Image.Resampling.LANCZOS)
+    img.thumbnail((256, 256), Image.Resampling.LANCZOS)
     buffer = BytesIO()
     img.save(buffer, format=format)
     return buffer.getvalue()
@@ -492,10 +530,10 @@ def serve_image(path: str, expires: int, sig: str):
 
 
 @ar_images.get("/id/{id}")
-def get_image_edit_form(id: int, htmx, request, session):
+def get_image_edit_form(id: int, htmx, request, auth):
     from .category_utils import get_all_categories
 
-    user_id = session.get("user_id")
+    user_id = auth
     is_admin = request.scope.get("is_admin", False)
 
     if not can_access_image(id, user_id, is_admin):
@@ -515,8 +553,11 @@ def get_image_edit_form(id: int, htmx, request, session):
     shared_group_ids = get_shared_group_ids(id)
     categories = get_all_categories()
 
-    content = ImageEditPage(
-        image, can_edit, user_groups, shared_group_ids, categories, user_id
+    content = (
+        *ImageCropperJS(),
+        ImageEditPage(
+            image, can_edit, user_groups, shared_group_ids, categories, user_id
+        ),
     )
     return get_full_layout(content, htmx, is_admin)
 
@@ -528,14 +569,14 @@ async def post_image_edit_form(
     category: str,
     htmx,
     request,
-    session,
+    auth,
     shared_groups: str | None = None,
     new_uploaded_image: UploadFile | None = None,
 ) -> Any:
     from .category_utils import validate_and_get_category
 
     image = images[id]
-    user_id = session.get("user_id")
+    user_id = auth
     is_admin = request.scope.get("is_admin", False)
 
     if image.owner_id != user_id and not is_admin:
@@ -569,15 +610,59 @@ async def post_image_edit_form(
             if group_id:
                 image_shares.insert(image_id=id, user_group_id=int(group_id))
 
-    return get_image_edit_form(id, htmx, request, session)
+    return get_image_edit_form(id, htmx, request, auth)
+
+
+@ar_images.post("/id/{id}/thumbnail")
+async def update_thumbnail(
+    id: int,
+    request,
+    auth,
+    thumbnail_crop: UploadFile | None = None,
+):
+    user_id = auth
+    is_admin = request.scope.get("is_admin", False)
+    image = images[id]
+
+    if image.owner_id != user_id and not is_admin:
+        return Response("Forbidden", status_code=403)
+
+    if not thumbnail_crop or not thumbnail_crop.filename:
+        return Response("No thumbnail provided", status_code=400)
+
+    try:
+        image_data, content_type = await get_safe_image_data(thumbnail_crop)
+        storage = get_storage_service()
+
+        if image.thumbnail_path:
+            storage.delete_image(image.thumbnail_path)
+
+        image.thumbnail_path = storage.save_image(
+            image_data, image.id, content_type, is_thumbnail=True
+        )
+        images.update(image)
+
+        thumbnail_url = storage.generate_signed_url(
+            image.thumbnail_path, cache_bust=True
+        )
+        return Img(
+            src=thumbnail_url,
+            alt=f"{image.name} thumbnail",
+            style="width: 256px; height: 256px; display: block;",
+            id=f"thumbnail-display-{image.id}",
+        )
+    except Exception as e:
+        logger.error(f"Error updating thumbnail: {e}")
+        return Response(f"Error: {e}", status_code=500)
 
 
 @ar_images.delete("/id/{id}")
-def delete_image(id: int, htmx, request, session):
-    owner_id = session.get("user_id")
+def delete_image(id: int, htmx, request, auth, session):
+    owner_id = auth
+    is_admin = request.scope.get("is_admin", False)
     image = images[id]
 
-    if image.owner_id != owner_id:
+    if image.owner_id != owner_id and not is_admin:
         return RedirectResponse("/unauthorized", status_code=303)
 
     storage = get_storage_service()
@@ -596,10 +681,10 @@ def delete_image(id: int, htmx, request, session):
 
 
 @ar_images.get("/new", name="Upload Images")
-def get_image_upload_form(htmx, session, request):
+def get_image_upload_form(htmx, auth, request):
     from .category_utils import get_all_categories
 
-    user_id = session.get("user_id")
+    user_id = auth
     is_admin = request.scope.get("is_admin", False)
 
     categories = get_all_categories()
@@ -612,13 +697,13 @@ def get_image_upload_form(htmx, session, request):
 @ar_images.post("/new")
 async def post_image_upload_form(
     uploaded_images: list[UploadFile],
-    session,
+    auth,
     category: str = "",
     shared_groups: str | None = None,
 ):
     from .category_utils import validate_and_get_category
 
-    owner_id = session.get("user_id")
+    owner_id = auth
 
     try:
         validated_category = validate_and_get_category(category or "unclassified")
@@ -646,9 +731,10 @@ async def post_image_upload_form(
         images_to_insert.append(img)
 
     if shared_groups:
-        for group_id in shared_groups.split(","):
-            if group_id:
-                image_shares.insert(image_id=id, user_group_id=int(group_id))
+        for img in images_to_insert:
+            for group_id in shared_groups.split(","):
+                if group_id:
+                    image_shares.insert(image_id=img.id, user_group_id=int(group_id))
 
     return get_image_cards(images_to_insert, owner_id)
 
@@ -659,10 +745,10 @@ async def post_image_upload_form(
 
 
 @ar_images.get("/list", name="View Gallery")
-def get_image_gallery(htmx, request, session, category: str = "", mine_only: str = ""):
+def get_image_gallery(htmx, request, auth, category: str = "", mine_only: str = ""):
     from .category_utils import get_all_categories
 
-    user_id = session.get("user_id")
+    user_id = auth
     is_admin = request.scope.get("is_admin", False)
 
     accessible_images = get_accessible_images(user_id, is_admin)

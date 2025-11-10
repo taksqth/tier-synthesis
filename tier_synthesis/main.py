@@ -143,9 +143,9 @@ async def security_headers(request, call_next):
     if response.headers.get("content-type", "").startswith("text/html"):
         response.headers["content-type"] = "text/html; charset=utf-8"
 
-    # Allow caching for static assets and signed image URLs
-    if request.url.path.startswith("/static/") or request.url.path.startswith("/images/img"):
-        # Preserve Cache-Control header set by the route handler
+    if request.url.path.startswith("/static/") or request.url.path.startswith(
+        "/images/img"
+    ):
         cache_control = response.headers.get(
             "Cache-Control", "public, max-age=31536000, immutable"
         )

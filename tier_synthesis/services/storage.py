@@ -81,7 +81,7 @@ class StorageService:
         with open(full_path, "rb") as f:
             return f.read()
 
-    def generate_signed_url(self, file_path: str) -> str:
+    def generate_signed_url(self, file_path: str, cache_bust: bool = False) -> str:
         """Generate signed URL with daily expiry for optimal caching.
 
         URLs expire at midnight UTC (next day), meaning:
@@ -92,9 +92,9 @@ class StorageService:
 
         Args:
             file_path: Path to the file
+            cache_bust: If True, append timestamp to force browser cache invalidation
         """
         current_time = int(time.time())
-        # Round to next day at midnight UTC
         seconds_per_day = 86400
         expiry = ((current_time // seconds_per_day) + 1) * seconds_per_day
 
@@ -106,7 +106,12 @@ class StorageService:
         ).hexdigest()
 
         params = urlencode({"path": file_path, "expires": expiry, "sig": signature})
-        return f"/images/img?{params}"
+        url = f"/images/img?{params}"
+
+        if cache_bust:
+            url = f"{url}&t={current_time}"
+
+        return url
 
     def validate_signature(self, file_path: str, expiry: int, signature: str) -> bool:
         if int(time.time()) > expiry:
